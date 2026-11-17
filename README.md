@@ -208,7 +208,8 @@ Os valores em risco são os do dia do diagnóstico. Não descem quando um entreg
 - **O número fica à vista.** Em ecrãs baixos e no telemóvel, a faturação em risco acompanha o ecrã enquanto se responde.
 - **Repetir um diagnóstico.** Com a empresa escolhida, o stress test oferece partir das respostas do último diagnóstico dela.
 - **Rascunho.** As respostas sobrevivem a uma recarga. Pertencem a quem as deu e à empresa escolhida: não passam para a reunião seguinte nem para outra empresa, e saem do browser ao terminar a sessão.
-- **Alterações ao plano.** Cada alteração aparece logo e é gravada a seguir. Se a gravação falhar ou não houver rede, a alteração volta atrás e fica um aviso com a opção de repetir.
+- **Alterações ao plano.** Cada alteração aparece logo e é gravada a seguir. Se a gravação falhar ou não houver rede, a alteração volta atrás e fica um aviso com a opção de repetir. O resumo executivo só é exportado depois de as alterações em curso ficarem gravadas ou desfeitas, para o documento ser igual ao que está no sistema.
+- **Diagnóstico guardado sem plano aberto.** Se a gravação correr bem e a troca para a empresa falhar, o ecrã diz que o diagnóstico ficou guardado e oferece «Abrir o plano», em vez de o dar como perdido.
 - **Teclado.** Todo o percurso se faz sem rato, e o foco volta ao sítio de onde saiu ao fechar um painel.
 
 ## API
