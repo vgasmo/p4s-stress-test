@@ -15,8 +15,9 @@ import { ErrorBanner } from '@/components/ui/states';
 import { Switch } from '@/components/ui/switch';
 import { useCompanies, useMe } from '@/hooks/useAuth';
 import { useCatalog, useCreateAssessment, usePublicSimulation, useStressTestPreview } from '@/hooks/useAssessment';
+import { useContactEmail } from '@/hooks/usePublicInfo';
 import { errorMessage, type CreateAssessmentPayload } from '@/lib/api';
-import { P4S_CONTACT_EMAIL, diagnosisRequestMailto } from '@/lib/contact';
+import { diagnosisRequestMailto } from '@/lib/contact';
 import {
   SECTOR_PROFILE_LABELS,
   formatCompactEUR,
@@ -152,6 +153,7 @@ export function AssessmentWizard() {
   const catalog = useCatalog();
   const preview = useStressTestPreview(input, catalog.data);
   const publicSimulation = usePublicSimulation(input, !staff && state.annualRevenue > 0);
+  const contact = useContactEmail();
 
   if (session && me.isPending) return <WizardSkeleton />;
   if (session && me.isError) {
@@ -225,9 +227,9 @@ export function AssessmentWizard() {
   // já com o que simulou. Só existe se quem publicou tiver indicado o endereço de contacto.
   const simulatedRisk = publicSimulation.isPlaceholderData ? null : publicSimulation.data?.commercialRisk;
   const requestHref =
-    mode === 'anonymous' && P4S_CONTACT_EMAIL
+    mode === 'anonymous' && contact
       ? diagnosisRequestMailto(
-          P4S_CONTACT_EMAIL,
+          contact,
           state.annualRevenue > 0
             ? {
                 sector: SECTOR_PROFILE_LABELS[state.sectorProfile],
@@ -495,6 +497,7 @@ export function AssessmentWizard() {
           <SaveArea
             mode={mode}
             requestHref={requestHref}
+            contact={contact}
             destination={destination}
             canRestart={state.touched}
             onRestart={draft.restart}
@@ -560,6 +563,7 @@ function RestartButton({ onRestart }: { onRestart: () => void }) {
 function SaveArea({
   mode,
   requestHref,
+  contact,
   destination,
   canRestart,
   onRestart,
@@ -571,6 +575,8 @@ function SaveArea({
   mode: WizardMode;
   /** Ligação para o visitante pedir o diagnóstico completo por email. Null sem contacto configurado. */
   requestHref: string | null;
+  /** O endereço de contacto, por extenso, para quem não tem programa de email. */
+  contact: string | null;
   /** Onde o diagnóstico fica gravado (só para a equipa P4S). */
   destination: string;
   canRestart: boolean;
@@ -593,7 +599,7 @@ function SaveArea({
             </Button>
             <p className="text-2xs text-slate-600">
               Abre uma mensagem para a equipa Plan4Sustain, já com esta simulação. Se não abrir, escreva para{' '}
-              <span className="font-medium text-slate-900 [overflow-wrap:anywhere]">{P4S_CONTACT_EMAIL}</span>.
+              <span className="font-medium text-slate-900 [overflow-wrap:anywhere]">{contact}</span>.
             </p>
           </>
         ) : (

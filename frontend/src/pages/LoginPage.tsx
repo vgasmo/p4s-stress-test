@@ -6,8 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input, Label } from '@/components/ui/form';
 import { ErrorBanner } from '@/components/ui/states';
 import { useAuthActions } from '@/hooks/useAuth';
+import { useContactEmail } from '@/hooks/usePublicInfo';
 import { errorMessage } from '@/lib/api';
-import { P4S_CONTACT_EMAIL, diagnosisRequestMailto } from '@/lib/contact';
+import { diagnosisRequestMailto } from '@/lib/contact';
 import { safeNext } from '@/lib/safe-next';
 import { useSession } from '@/lib/session';
 
@@ -89,6 +90,7 @@ export function LoginPage() {
 
 /** Quem chega aqui sem conta não fica à porta: a simulação é livre e o diagnóstico completo pede-se à equipa. */
 function NoAccountYet() {
+  const contact = useContactEmail();
   return (
     <section aria-labelledby="no-account-title" className="max-w-xl rounded-lg border border-slate-200 bg-white px-4 py-3 lg:col-start-1 lg:row-start-2">
       <h2 id="no-account-title" className="text-sm font-semibold text-slate-900">
@@ -98,9 +100,9 @@ function NoAccountYet() {
         A simulação não precisa de conta. O diagnóstico completo é feito com a equipa Plan4Sustain.
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
-        {P4S_CONTACT_EMAIL && (
+        {contact && (
           <Button asChild size="sm">
-            <a href={diagnosisRequestMailto(P4S_CONTACT_EMAIL)} data-testid="request-diagnosis">
+            <a href={diagnosisRequestMailto(contact)} data-testid="request-diagnosis">
               <Mail aria-hidden /> Pedir o diagnóstico completo
             </a>
           </Button>
@@ -109,10 +111,10 @@ function NoAccountYet() {
           <Link to="/">Voltar à simulação</Link>
         </Button>
       </div>
-      {P4S_CONTACT_EMAIL && (
+      {contact && (
         <p className="mt-2 text-xs text-slate-600">
           Abre uma mensagem para a equipa Plan4Sustain. Se não abrir, escreva para{' '}
-          <span className="font-medium text-slate-900 [overflow-wrap:anywhere]">{P4S_CONTACT_EMAIL}</span>.
+          <span className="font-medium text-slate-900 [overflow-wrap:anywhere]">{contact}</span>.
         </p>
       )}
     </section>

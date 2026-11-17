@@ -128,7 +128,7 @@ expectEq('sem sessão: o catálogo não é servido', (await page.request.get(`${
 await page.screenshot({ path: `${OUT}/01-wizard-anonimo.png`, fullPage: true });
 
 // ── 2. Entrar como empresa: a simulação mantém-se, sempre por escalões e sem gravar ──
-await page.getByRole('link', { name: /Entrar para guardar/ }).click();
+await page.getByRole('link', { name: 'Já tenho conta' }).click();
 await loginAs(COMPANY_EMAIL, COMPANY_PASSWORD);
 await page.waitForURL(/\/$/);
 await page.getByText('Simulação para Moldes Exemplo, Lda (demonstração)').waitFor();
