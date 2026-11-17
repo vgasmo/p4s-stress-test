@@ -1,5 +1,5 @@
 import { ArrowRight, Building2, ClipboardList, LogIn, RotateCcw } from 'lucide-react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { SECTOR_PROFILES } from '@engine/models/domain';
 import { REQUIREMENTS, describeSources, forSector, requirementStatus } from '@engine/services/requirements';
@@ -27,6 +27,8 @@ import { isStaffSession, useSession } from '@/lib/session';
 import { cn } from '@/lib/utils';
 import type { PlanNavigationState } from '@/pages/ActionPlanPage';
 import { LiveImpactPreview } from './LiveImpactPreview';
+import { RadioTiles } from './RadioTiles';
+import { useAppHeaderHeight } from './useElementHeight';
 import {
   DEFAULT_STATE,
   applyToSessionCompany,
@@ -47,6 +49,7 @@ import {
 /** anonymous: visitante. company: conta de uma empresa (só simula). staff: equipa P4S (grava). */
 type WizardMode = 'anonymous' | 'company' | 'staff';
 
+const SECTOR_OPTIONS = SECTOR_PROFILES.map((sector) => ({ value: sector, label: SECTOR_PROFILE_LABELS[sector] }));
 const REVENUE_PRESETS = [2_000_000, 5_000_000, 10_000_000, 25_000_000];
 const CREDIT_PRESETS = [1_000_000, 2_500_000, 5_000_000];
 
@@ -120,6 +123,7 @@ export function AssessmentWizard() {
   const [unread, setUnread] = useState({ revenue: false, credit: false });
   // Um botão rápido repõe o campo, mesmo que o valor escolhido seja o que já lá estava.
   const [picks, setPicks] = useState({ revenue: 0, credit: 0 });
+  const headerHeight = useAppHeaderHeight();
 
   const company = me.data?.company ?? null;
   const ctx: DraftContext | undefined =
@@ -208,7 +212,11 @@ export function AssessmentWizard() {
   const spreadBps = catalog.data?.spreadPenaltyBps;
 
   return (
-    <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_420px]">
+    <div
+      // Um controlo que recebe o foco é trazido para baixo do cabeçalho fixo, e não para trás dele.
+      className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_420px] [&_:is(a,button,input,summary,[role=slider])]:scroll-mt-[var(--focus-top)]"
+      style={{ '--focus-top': `${headerHeight + 12}px` } as CSSProperties}
+    >
       <div className="space-y-4">
         <CompanyBlock
           mode={mode}
@@ -242,30 +250,17 @@ export function AssessmentWizard() {
             </div>
           </CardHeader>
           <CardContent className="space-y-5">
-            <fieldset className="space-y-2">
-              <legend className="text-xs font-medium text-slate-700">Perfil setorial</legend>
-              <div role="radiogroup" aria-label="Perfil setorial" className="grid grid-cols-2 gap-2 xl:grid-cols-4">
-                {SECTOR_PROFILES.map((sector) => {
-                  const checked = state.sectorProfile === sector;
-                  return (
-                    <button
-                      key={sector}
-                      type="button"
-                      role="radio"
-                      aria-checked={checked}
-                      onClick={() => update({ sectorProfile: sector })}
-                      className={cn(
-                        'rounded-md border px-3 py-2 text-left text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900',
-                        checked
-                          ? 'border-slate-900 bg-slate-900 text-white'
-                          : 'border-slate-300 bg-white text-slate-800 hover:border-slate-400 hover:bg-slate-50',
-                      )}
-                    >
-                      {SECTOR_PROFILE_LABELS[sector]}
-                    </button>
-                  );
-                })}
-              </div>
+            <div className="space-y-2">
+              <p id="sector-label" className="text-xs font-medium text-slate-700">
+                Perfil setorial
+              </p>
+              <RadioTiles
+                labelledBy="sector-label"
+                value={state.sectorProfile}
+                options={SECTOR_OPTIONS}
+                onChange={(sectorProfile) => update({ sectorProfile })}
+                className="grid grid-cols-2 gap-2 xl:grid-cols-4"
+              />
               {catalog.data && (
                 <FieldHint>
                   {dealbreaker
@@ -275,7 +270,7 @@ export function AssessmentWizard() {
                     : 'Sem piso de bloqueio neste setor. Contam só os pesos das lacunas.'}
                 </FieldHint>
               )}
-            </fieldset>
+            </div>
 
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
               <div className="space-y-2">
@@ -302,6 +297,7 @@ export function AssessmentWizard() {
                 </div>
                 <Slider
                   aria-labelledby="share-label"
+                  formatValue={(value) => `${value}%`}
                   min={10}
                   max={100}
                   step={1}
