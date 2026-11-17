@@ -202,6 +202,15 @@ Os valores em risco são os do dia do diagnóstico. Não descem quando um entreg
 - O resumo impresso diz que os prazos são calculados para adjudicação na data de emissão e que deslizam se a adjudicação for posterior.
 - Sem entregáveis da P4S ou do parceiro, o resumo regista o diagnóstico e não leva bloco de aceitação.
 
+## Na reunião
+
+- **Valores.** Os campos em euros aceitam «5M», «6,5 M», «500k» e «500 mil». O que não se percebe fica assinalado no campo, em vez de contar como zero. «2.5» e «0.500» são recusados por serem ambíguos.
+- **O número fica à vista.** Em ecrãs baixos e no telemóvel, a faturação em risco acompanha o ecrã enquanto se responde.
+- **Repetir um diagnóstico.** Com a empresa escolhida, o stress test oferece partir das respostas do último diagnóstico dela.
+- **Rascunho.** As respostas sobrevivem a uma recarga. Pertencem a quem as deu e à empresa escolhida: não passam para a reunião seguinte nem para outra empresa, e saem do browser ao terminar a sessão.
+- **Alterações ao plano.** Cada alteração aparece logo e é gravada a seguir. Se a gravação falhar ou não houver rede, a alteração volta atrás e fica um aviso com a opção de repetir.
+- **Teclado.** Todo o percurso se faz sem rato, e o foco volta ao sítio de onde saiu ao fechar um painel.
+
 ## API
 
 Base: `/api/v1`. Erros em `{ "error": { "code", "message", "details?" } }`. Nenhuma resposta fica em cache (`Cache-Control: no-store`).
