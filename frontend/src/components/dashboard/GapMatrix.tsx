@@ -1,19 +1,29 @@
 // Matriz de conformidade por fase: o que falta, quem exige e qual a solução.
 // Usa a fotografia gravada no diagnóstico (não recalcula com regras mais recentes).
+// No fim mostra as contas e os pressupostos por trás de cada número.
 
 import { Check, Minus, X } from 'lucide-react';
-import type { RequirementSnapshot } from '@engine/models/api.types';
+import type { ReactNode } from 'react';
+import type { AssessmentDetail, RequirementSnapshot } from '@engine/models/api.types';
 import type { TaskPhase } from '@engine/models/domain';
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ExecutorBadge } from '@/components/tasks/TaskBadges';
-import { PHASE_LABELS, PHASE_WINDOWS, formatEUR } from '@/lib/formatters';
+import {
+  formatEUR,
+  formatNumberPt,
+  formatPercent,
+  formatWeight,
+  phaseLabel,
+  phaseWindowText,
+} from '@/lib/formatters';
 import { cn } from '@/lib/utils';
 
 const PHASES: TaskPhase[] = ['phase_1_urgent', 'phase_2_structural'];
 
-export function GapMatrix({ requirements }: { requirements: RequirementSnapshot[] }) {
+export function GapMatrix({ assessment }: { assessment: AssessmentDetail }) {
+  const { requirements } = assessment.snapshot;
   const gaps = requirements.filter((r) => r.status === 'gap').length;
 
   return (
@@ -32,10 +42,10 @@ export function GapMatrix({ requirements }: { requirements: RequirementSnapshot[
         {PHASES.map((phase) => {
           const rows = requirements.filter((r) => r.solution.phase === phase);
           return (
-            <section key={phase} aria-label={PHASE_LABELS[phase]}>
+            <section key={phase} aria-label={phaseLabel(phase)}>
               <div className="flex items-baseline justify-between px-4 pb-1 pt-3">
-                <h3 className="text-xs font-semibold text-slate-900">{PHASE_LABELS[phase]}</h3>
-                <span className="font-mono text-2xs tabular-nums text-slate-600">{PHASE_WINDOWS[phase]}</span>
+                <h3 className="text-xs font-semibold text-slate-900">{phaseLabel(phase)}</h3>
+                <span className="font-mono text-2xs tabular-nums text-slate-600">{phaseWindowText(phase)}</span>
               </div>
               {rows.length === 0 ? (
                 <p className="px-4 pb-3 text-xs text-slate-600">Nenhum requisito neste horizonte para o setor avaliado.</p>
@@ -97,7 +107,77 @@ export function GapMatrix({ requirements }: { requirements: RequirementSnapshot[
           );
         })}
       </div>
+      <Assumptions assessment={assessment} />
     </Card>
+  );
+}
+
+/** As contas por trás dos números, com o que é pressuposto dito às claras. */
+function Assumptions({ assessment }: { assessment: AssessmentDetail }) {
+  const { snapshot } = assessment;
+  const { input } = snapshot;
+  const commercialGaps = snapshot.requirements.filter((r) => r.status === 'gap' && r.channel === 'commercial');
+  const weightUsed = assessment.riskScore;
+  const floor = snapshot.dealbreaker?.raisedWeight ? snapshot.dealbreaker.floorPoints : null;
+  const hasSpread = assessment.estimatedSpreadPenalty > 0;
+
+  return (
+    <details className="group border-t border-slate-200 text-xs text-slate-700">
+      <summary className="cursor-pointer select-none px-4 py-2.5 font-medium text-slate-900 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-900">
+        De onde vêm os números e que pressupostos têm
+      </summary>
+      <div className="space-y-3 border-t border-slate-200 bg-slate-50 px-4 py-3">
+        <p className="max-w-prose">
+          Os valores em euros da carteira exposta e da penalização bancária são ordens de grandeza. O peso de cada lacuna e
+          o agravamento de spread são pressupostos de trabalho da Plan4Sustain para o setor, não medições desta empresa.
+        </p>
+        <dl className="grid max-w-3xl grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-[minmax(0,1fr)_auto]">
+          <Line label={`Base exposta: ${formatPercent(input.topClientsShare)} de ${formatEUR(input.annualRevenue)} nos 3 maiores clientes`}>
+            {formatEUR(snapshot.exposedClientRevenue)}
+          </Line>
+          {commercialGaps.map((gap) => (
+            <Line key={gap.code} label={`Sem ${gap.label}${gap.evidence ? ` (${gap.evidence})` : ''}`}>
+              {formatWeight(gap.weightPoints)}
+            </Line>
+          ))}
+          {commercialGaps.length > 0 && (
+            <Line
+              label={
+                floor !== null
+                  ? `Peso usado: piso de bloqueio do setor (a soma das lacunas dava ${formatNumberPt(snapshot.commercialGapPoints / 100, 2)})`
+                  : snapshot.commercialGapPoints > 100
+                    ? `Peso usado: limitado a 1,00 (a soma das lacunas dava ${formatNumberPt(snapshot.commercialGapPoints / 100, 2)})`
+                    : 'Peso usado: soma das lacunas'
+              }
+            >
+              {formatNumberPt(weightUsed / 100, 2)}
+            </Line>
+          )}
+          <Line label="Faturação comercial em risco: base exposta × peso usado" strong>
+            {formatEUR(assessment.commercialRevenueAtRisk)}
+          </Line>
+          {hasSpread && (
+            <Line
+              label={`Penalização bancária: ${formatEUR(assessment.creditLineToRefinance)} a refinanciar${
+                snapshot.spreadPenaltyBps ? ` × ${snapshot.spreadPenaltyBps} pontos base` : ''
+              }`}
+              strong
+            >
+              {formatEUR(assessment.estimatedSpreadPenalty)}/ano
+            </Line>
+          )}
+        </dl>
+      </div>
+    </details>
+  );
+}
+
+function Line({ label, strong, children }: { label: string; strong?: boolean; children: ReactNode }) {
+  return (
+    <>
+      <dt className={cn(strong && 'font-medium text-slate-900')}>{label}</dt>
+      <dd className={cn('font-mono tabular-nums text-slate-900 sm:text-right', strong && 'font-semibold')}>{children}</dd>
+    </>
   );
 }
 

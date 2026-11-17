@@ -3,13 +3,13 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { SECTOR_PROFILES, type SectorProfile } from '@engine/models/domain';
 import {
-  REQUIREMENT_CATALOG,
-  SECTOR_DEALBREAKERS,
-  SPREAD_PENALTY_BPS,
+  REQUIREMENTS,
   describeSources,
-  type RequirementCode,
+  forSector,
+  requirementStatus,
+  type AnswerField,
   type StressTestInput,
-} from '@engine/services/requirements.catalog';
+} from '@engine/services/requirements';
 import { isValidNif } from '@engine/utils/validation';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -21,7 +21,7 @@ import { Slider } from '@/components/ui/slider';
 import { ErrorBanner } from '@/components/ui/states';
 import { Switch } from '@/components/ui/switch';
 import { useMe } from '@/hooks/useAuth';
-import { useCreateAssessment, useStressTestPreview } from '@/hooks/useAssessment';
+import { useCatalog, useCreateAssessment, usePublicSimulation, useStressTestPreview } from '@/hooks/useAssessment';
 import { errorMessage, type CreateAssessmentPayload } from '@/lib/api';
 import {
   SECTOR_PROFILE_LABELS,
@@ -34,9 +34,7 @@ import { isStaffSession, useSession } from '@/lib/session';
 import { cn, readStorage, writeStorage } from '@/lib/utils';
 import { LiveImpactPreview } from './LiveImpactPreview';
 
-type RequirementField = 'ecovadis' | 'carbonFootprintScope12' | 'carbonFootprintScope3' | 'bankingEsgMetrics' | 'tisaxOrNis2';
-
-export interface WizardState extends Record<RequirementField, boolean> {
+export interface WizardState extends Record<AnswerField, boolean> {
   companyName: string;
   companyNif: string;
   sectorProfile: SectorProfile;
@@ -67,14 +65,6 @@ const DEFAULT_STATE: WizardState = {
   tisaxOrNis2: false,
   prefilledFor: null,
   touched: false,
-};
-
-const REQUIREMENT_FIELDS: Record<RequirementCode, RequirementField> = {
-  ecovadis: 'ecovadis',
-  carbon_scope_1_2: 'carbonFootprintScope12',
-  carbon_scope_3: 'carbonFootprintScope3',
-  banking_esg: 'bankingEsgMetrics',
-  information_security: 'tisaxOrNis2',
 };
 
 const REVENUE_PRESETS = [2_000_000, 5_000_000, 10_000_000, 25_000_000];
@@ -145,7 +135,11 @@ export function AssessmentWizard() {
   }, [sessionCompanyId]);
 
   const input = useMemo(() => toStressTestInput(state), [state]);
-  const preview = useStressTestPreview(input);
+  // Com sessão calcula-se aqui, com o catálogo que vem da API. Sem sessão o servidor
+  // devolve só ordens de grandeza: os pesos e os preços não estão no código público.
+  const catalog = useCatalog();
+  const preview = useStressTestPreview(input, catalog.data);
+  const publicSimulation = usePublicSimulation(input, !session && state.annualRevenue > 0);
 
   if (session && me.isPending) return <WizardSkeleton />;
   if (session && me.isError) {
@@ -179,8 +173,8 @@ export function AssessmentWizard() {
     });
   };
 
-  const dealbreaker = SECTOR_DEALBREAKERS.find((rule) => rule.sector === state.sectorProfile);
-  const evaluations = 'result' in preview ? preview.result.evaluations : [];
+  const dealbreaker = catalog.data?.dealbreakers.find((rule) => rule.sector === state.sectorProfile);
+  const spreadBps = catalog.data?.spreadPenaltyBps;
 
   return (
     <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_420px]">
@@ -204,7 +198,7 @@ export function AssessmentWizard() {
           <CardHeader>
             <div>
               <CardTitle>1 · Perfil e base exposta</CardTitle>
-              <CardDescription>O setor muda os pesos e os pisos de bloqueio. A base exposta é a faturação nos 3 maiores clientes.</CardDescription>
+              <CardDescription>O setor muda o peso de cada exigência. A base exposta é a faturação nos 3 maiores clientes.</CardDescription>
             </div>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -232,13 +226,15 @@ export function AssessmentWizard() {
                   );
                 })}
               </div>
-              <FieldHint>
-                {dealbreaker
-                  ? `Piso de bloqueio: sem ${dealbreaker.triggers
-                      .map((code) => REQUIREMENT_CATALOG.find((rule) => rule.code === code)?.label)
-                      .join(' ou ')}, o peso comercial nunca fica abaixo de ${formatNumberPt(dealbreaker.floorPoints / 100, 2)}.`
-                  : 'Sem piso de bloqueio neste setor. Contam só os pesos das lacunas.'}
-              </FieldHint>
+              {catalog.data && (
+                <FieldHint>
+                  {dealbreaker
+                    ? `Piso de bloqueio: sem ${dealbreaker.triggers
+                        .map((code) => REQUIREMENTS.find((requirement) => requirement.code === code)?.label)
+                        .join(' ou ')}, o peso comercial nunca fica abaixo de ${formatNumberPt(dealbreaker.floorPoints / 100, 2)}.`
+                    : 'Sem piso de bloqueio neste setor. Contam só os pesos das lacunas.'}
+                </FieldHint>
+              )}
             </fieldset>
 
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
@@ -276,7 +272,10 @@ export function AssessmentWizard() {
           <CardHeader>
             <div>
               <CardTitle>2 · Banca</CardTitle>
-              <CardDescription>Risco financeiro, separado da faturação. Sem rácios ESG, o refinanciamento agrava o spread em {SPREAD_PENALTY_BPS} bps/ano.</CardDescription>
+              <CardDescription>
+                Risco financeiro, separado da faturação. Sem rácios ESG, o refinanciamento agrava o spread
+                {spreadBps ? ` em ${spreadBps} pontos base por ano` : ''}.
+              </CardDescription>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -309,32 +308,34 @@ export function AssessmentWizard() {
             </div>
           </CardHeader>
           <ul className="divide-y divide-slate-200">
-            {REQUIREMENT_CATALOG.map((rule) => {
-              const field = REQUIREMENT_FIELDS[rule.code];
-              const evaluation = evaluations.find((e) => e.rule.code === rule.code);
-              const notApplicable = evaluation?.status === 'not_applicable';
-              const impact =
-                rule.channel === 'financial'
-                  ? `${SPREAD_PENALTY_BPS} bps/ano sobre o crédito`
-                  : `${formatWeight(evaluation?.weightPoints ?? 0)} na exposição`;
+            {REQUIREMENTS.map((requirement) => {
+              const field = requirement.answerField;
+              const status = requirementStatus(requirement, input);
+              const notApplicable = status === 'not_applicable';
+              // O peso só é conhecido com sessão (vem com o catálogo).
+              const impact = !catalog.data
+                ? null
+                : requirement.channel === 'financial'
+                  ? `${catalog.data.spreadPenaltyBps} bps/ano sobre o crédito`
+                  : `${formatWeight(forSector(catalog.data.parameters[requirement.code].weightPoints, state.sectorProfile))} na exposição`;
               return (
-                <li key={rule.code} className={cn('flex items-center gap-4 px-4 py-3', notApplicable && 'bg-slate-50')}>
+                <li key={requirement.code} className={cn('flex items-center gap-4 px-4 py-3', notApplicable && 'bg-slate-50')}>
                   <div className="min-w-0 flex-1">
-                    <label htmlFor={`req-${rule.code}`} className="text-sm font-medium text-slate-900">
-                      {rule.label}
+                    <label htmlFor={`req-${requirement.code}`} className="text-sm font-medium text-slate-900">
+                      {requirement.label}
                     </label>
                     <p className="text-xs text-slate-600">
-                      Exigido por {describeSources(rule.requiredBy)}
+                      Exigido por {describeSources(requirement.requiredBy)}
                       {notApplicable ? ' · só conta com refinanciamento a <18 meses' : ''}
                     </p>
                   </div>
-                  <span className="hidden font-mono text-xs tabular-nums text-slate-700 sm:block">{impact}</span>
-                  <StatusPill status={evaluation?.status} />
+                  {impact && <span className="hidden font-mono text-xs tabular-nums text-slate-700 sm:block">{impact}</span>}
+                  <StatusPill status={status} />
                   <Switch
-                    id={`req-${rule.code}`}
+                    id={`req-${requirement.code}`}
                     checked={state[field]}
                     onCheckedChange={(checked) => update({ [field]: checked } as Partial<WizardState>)}
-                    aria-label={`${rule.label}: ${state[field] ? 'tem' : 'não tem'}`}
+                    aria-label={`${requirement.label}: ${state[field] ? 'tem' : 'não tem'}`}
                   />
                 </li>
               );
@@ -344,7 +345,24 @@ export function AssessmentWizard() {
       </div>
 
       <LiveImpactPreview
-        preview={preview}
+        source={
+          session
+            ? {
+                kind: 'full',
+                preview,
+                catalog: catalog.data,
+                loadError: catalog.isError ? errorMessage(catalog.error) : null,
+                onRetry: () => void catalog.refetch(),
+              }
+            : {
+                kind: 'public',
+                simulation: publicSimulation.data,
+                updating: publicSimulation.isFetching || publicSimulation.isPlaceholderData,
+                error: publicSimulation.isError ? errorMessage(publicSimulation.error) : null,
+                onRetry: () => void publicSimulation.refetch(),
+              }
+        }
+        sectorProfile={state.sectorProfile}
         annualRevenue={state.annualRevenue}
         creditLineToRefinance={input.creditLineToRefinance}
         onUseSampleRevenue={() => update({ annualRevenue: 5_000_000 })}
@@ -432,8 +450,11 @@ function CompanyBlock({
   if (!session) {
     return (
       <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3">
-        <Badge tone="dark">Modo reunião</Badge>
-        <p className="text-sm text-slate-700">Simulação sem registo. Os números são os mesmos que ficam gravados no diagnóstico.</p>
+        <Badge tone="dark">Simulação</Badge>
+        <p className="text-sm text-slate-700">
+          Sem registo, vê a ordem de grandeza do que está em jogo. O valor estimado, o plano e o preço fechado ficam no
+          diagnóstico completo.
+        </p>
       </div>
     );
   }
@@ -556,7 +577,7 @@ function Presets({
   );
 }
 
-function StatusPill({ status }: { status: 'compliant' | 'gap' | 'not_applicable' | undefined }): ReactNode {
+function StatusPill({ status }: { status: 'compliant' | 'gap' | 'not_applicable' }): ReactNode {
   if (status === 'gap') return <Badge tone="critical">Lacuna</Badge>;
   if (status === 'compliant') return <Badge tone="success">Conforme</Badge>;
   return <Badge tone="outline">N/A</Badge>;

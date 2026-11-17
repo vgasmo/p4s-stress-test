@@ -5,19 +5,19 @@ import { createPortal } from 'react-dom';
 import type { AssessmentDetail } from '@engine/models/api.types';
 import type { Task, TaskPhase } from '@engine/models/domain';
 import { countsTowardsProposal, summarizeRemediation } from '@engine/services/remediation-summary';
-import { SPREAD_PENALTY_BPS } from '@engine/services/requirements.catalog';
 import { FOOTER_SIGNATURE, Wordmark } from '@/components/layout/AppShell';
 import {
   EXECUTOR_SHORT_LABELS,
-  PHASE_LABELS,
   addDays,
+  formatApproxEUR,
+  formatApproxPerYear,
   formatDatePt,
   formatEUR,
-  formatMultiple,
   formatNumberPt,
-  formatPerYear,
   formatPercent,
   formatShareOfRisk,
+  phaseLabel,
+  phaseWindowText,
   sectorLabel,
   todayInLisbon,
 } from '@/lib/formatters';
@@ -27,7 +27,7 @@ const PROPOSAL_VALIDITY_DAYS = 30;
 
 export function ExecutivePrintView({ assessment, tasks }: { assessment: AssessmentDetail; tasks: Task[] }) {
   const { company, snapshot } = assessment;
-  const summary = summarizeRemediation(tasks, assessment.commercialRevenueAtRisk, assessment.estimatedSpreadPenalty);
+  const summary = summarizeRemediation(tasks, assessment.commercialRevenueAtRisk);
   const included = tasks.filter((task) => task.includedInProposal);
   const gaps = snapshot.requirements.filter((r) => r.status === 'gap');
   const issuedOn = todayInLisbon();
@@ -55,20 +55,21 @@ export function ExecutivePrintView({ assessment, tasks }: { assessment: Assessme
         </dl>
 
         <section className="mt-3 grid grid-cols-3 gap-2.5 print-avoid-break">
-          <Kpi label="Faturação comercial em risco" value={formatEUR(assessment.commercialRevenueAtRisk)} accent="text-rose-700">
-            {formatPercent(snapshot.commercialRevenueAtRiskShare, 1)} da faturação anual · score {assessment.riskScore}/100
+          <Kpi label="Faturação comercial em risco" value={formatApproxEUR(assessment.commercialRevenueAtRisk)} accent="text-rose-700">
+            {formatPercent(Math.round(snapshot.commercialRevenueAtRiskShare))} da faturação anual · score {assessment.riskScore}/100
           </Kpi>
-          <Kpi label="Sobrecusto bancário anual" value={formatPerYear(assessment.estimatedSpreadPenalty)} accent="text-amber-800">
-            {assessment.creditLineToRefinance > 0
-              ? `${SPREAD_PENALTY_BPS} bps sobre ${formatEUR(assessment.creditLineToRefinance)} a refinanciar`
-              : 'Sem refinanciamento nos próximos 18 meses'}
+          <Kpi label="Sobrecusto bancário anual" value={formatApproxPerYear(assessment.estimatedSpreadPenalty)} accent="text-amber-800">
+            {assessment.estimatedSpreadPenalty > 0
+              ? `${snapshot.spreadPenaltyBps ? `${snapshot.spreadPenaltyBps} pontos base sobre ` : 'Sobre '}${formatEUR(assessment.creditLineToRefinance)} a refinanciar`
+              : assessment.creditLineToRefinance > 0
+                ? 'Rácios ESG disponíveis para o refinanciamento'
+                : 'Sem refinanciamento nos próximos 18 meses'}
           </Kpi>
           <Kpi label="Investimento de remediação" value={formatEUR(summary.totalInvestment)}>
             Fase 1 {formatEUR(summary.phase1Cost)} · Fase 2 {formatEUR(summary.phase2Cost)}
             {summary.phase1CostShareOfRisk !== null && summary.phase1Cost > 0
-              ? ` · Fase 1 = ${formatShareOfRisk(summary.phase1CostShareOfRisk)} da faturação em risco`
+              ? ` · a Fase 1 equivale a ${formatShareOfRisk(summary.phase1CostShareOfRisk)} da faturação em risco`
               : ''}
-            {summary.totalInvestment > 0 ? ` · proteção ${formatMultiple(summary.protectionRatio)}` : ''}
           </Kpi>
         </section>
 
@@ -125,7 +126,7 @@ export function ExecutivePrintView({ assessment, tasks }: { assessment: Assessme
                 <tbody key={phase}>
                   <tr className="bg-slate-100">
                     <td colSpan={3} className="px-1 py-1 text-[9px] font-semibold">
-                      {PHASE_LABELS[phase]}
+                      {phaseLabel(phase)} ({phaseWindowText(phase)})
                     </td>
                     <td className="px-1 py-1 text-right font-mono text-[9px] font-semibold tabular-nums">{formatEUR(subtotal)}</td>
                   </tr>
@@ -161,7 +162,17 @@ export function ExecutivePrintView({ assessment, tasks }: { assessment: Assessme
           </table>
         </section>
 
-        <footer className="mt-5 border border-slate-400 p-3 print-avoid-break">
+        <p className="mt-3 text-[9px] leading-snug text-slate-700 print-avoid-break">
+          <span className="font-semibold text-slate-900">Como ler estes números.</span> A faturação em risco e o sobrecusto
+          bancário são ordens de grandeza. Resultam de pressupostos da Plan4Sustain sobre o peso de cada exigência na
+          faturação dos 3 maiores clientes ({formatPercent(snapshot.input.topClientsShare)} da faturação anual)
+          {assessment.estimatedSpreadPenalty > 0 && snapshot.spreadPenaltyBps
+            ? ` e sobre o agravamento de spread sem rácios ESG (${snapshot.spreadPenaltyBps} pontos base por ano)`
+            : ''}
+          . Não são previsões nem medições desta empresa. Os honorários são fixos.
+        </p>
+
+        <footer className="mt-4 border border-slate-400 p-3 print-avoid-break">
           <p className="text-[11px] font-semibold">
             Proposta de honorários fixos válida por {PROPOSAL_VALIDITY_DAYS} dias
             <span className="font-normal text-slate-700">

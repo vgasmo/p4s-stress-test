@@ -124,7 +124,7 @@ function ActionPlan({ assessmentId }: { assessmentId: string }) {
     <div className="space-y-4">
       <PlanHeader detail={detail} history={history.data ?? []} />
       <ExecutiveScoreboard assessment={detail} tasks={currentTasks} />
-      <GapMatrix requirements={detail.snapshot.requirements} />
+      <GapMatrix assessment={detail} />
       <TaskManagementBoard assessment={detail} tasksQuery={tasks} />
       <ExecutivePrintView assessment={detail} tasks={currentTasks} />
     </div>

@@ -99,6 +99,8 @@ export interface RequirementSnapshot {
   channel: RiskChannel;
   status: RequirementStatus;
   weightPoints: number;
+  /** Caso ou fonte que sustenta o peso, quando existe no catálogo. */
+  evidence?: string;
   requiredBy: RequirementSource[];
   requiredByLabel: string;
   solution: {

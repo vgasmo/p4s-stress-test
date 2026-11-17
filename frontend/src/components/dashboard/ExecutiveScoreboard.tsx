@@ -1,19 +1,23 @@
-// Barra de comparação executiva: o que está em risco vs. quanto custa resolver.
+// Barra de comparação executiva: o que está em risco e quanto custa resolver, lado a lado.
 // Os totais são recalculados a partir das tarefas atuais (configurador de proposta),
 // com a mesma função que a API usa.
+//
+// As estimativas (faturação em risco, sobrecusto bancário) aparecem como ordem de
+// grandeza, porque os pesos por trás são pressupostos. Os honorários são preços e
+// aparecem exatos. O custo compara-se só com a faturação em risco.
 
 import type { ReactNode } from 'react';
 import type { AssessmentDetail } from '@engine/models/api.types';
 import type { Task } from '@engine/models/domain';
-import { SPREAD_PENALTY_BPS } from '@engine/services/requirements.catalog';
 import { countsTowardsProposal, summarizeRemediation } from '@engine/services/remediation-summary';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
+  exactValueTitle,
+  formatApproxEUR,
+  formatApproxPerYear,
   formatEUR,
-  formatMultiple,
   formatNumberPt,
-  formatPerYear,
   formatPercent,
   formatShareOfRisk,
 } from '@/lib/formatters';
@@ -30,7 +34,7 @@ const GRID = 'grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-s
 const plural = (count: number, one: string, many: string) => (count === 1 ? one : many);
 
 export function ExecutiveScoreboard({ assessment, tasks }: ExecutiveScoreboardProps) {
-  const summary = summarizeRemediation(tasks, assessment.commercialRevenueAtRisk, assessment.estimatedSpreadPenalty);
+  const summary = summarizeRemediation(tasks, assessment.commercialRevenueAtRisk);
   const phase1Count = tasks.filter((task) => countsTowardsProposal(task) && task.phase === 'phase_1_urgent').length;
   const openCritical = tasks.filter((task) => task.priority === 'critical' && task.status !== 'completed').length;
   const { snapshot } = assessment;
@@ -40,7 +44,8 @@ export function ExecutiveScoreboard({ assessment, tasks }: ExecutiveScoreboardPr
     <section aria-label="Comparação executiva" className={GRID}>
       <Cell
         label="Carteira comercial exposta"
-        value={formatEUR(assessment.commercialRevenueAtRisk)}
+        value={formatApproxEUR(assessment.commercialRevenueAtRisk)}
+        valueTitle={exactValueTitle(assessment.commercialRevenueAtRisk)}
         valueClass={assessment.commercialRevenueAtRisk > 0 ? 'text-rose-700' : 'text-slate-900'}
         testId="kpi-commercial-risk"
         badge={
@@ -49,20 +54,22 @@ export function ExecutiveScoreboard({ assessment, tasks }: ExecutiveScoreboardPr
           ) : null
         }
       >
-        <Num>{formatPercent(snapshot.commercialRevenueAtRiskShare, 1)}</Num> da faturação · score{' '}
+        <Num>{formatPercent(Math.round(snapshot.commercialRevenueAtRiskShare))}</Num> da faturação · score{' '}
         <Num>{assessment.riskScore}</Num>/100
       </Cell>
 
       <Cell
         label="Penalização bancária anual"
-        value={formatPerYear(spread)}
+        value={formatApproxPerYear(spread)}
+        valueTitle={exactValueTitle(spread, '/ano')}
         valueClass={spread > 0 ? 'text-amber-800' : 'text-slate-900'}
         testId="kpi-spread"
       >
         {assessment.creditLineToRefinance > 0 ? (
           spread > 0 ? (
             <>
-              {SPREAD_PENALTY_BPS} bps sobre <Num>{formatEUR(assessment.creditLineToRefinance)}</Num> a refinanciar
+              {snapshot.spreadPenaltyBps ? `${snapshot.spreadPenaltyBps} bps sobre ` : 'Sobre '}
+              <Num>{formatEUR(assessment.creditLineToRefinance)}</Num> a refinanciar
             </>
           ) : (
             'Rácios ESG disponíveis para o refinanciamento'
@@ -88,10 +95,10 @@ export function ExecutiveScoreboard({ assessment, tasks }: ExecutiveScoreboardPr
 
       <Cell label="Investimento total" value={formatEUR(summary.totalInvestment)} testId="kpi-total">
         Fase 2 <Num>{formatEUR(summary.phase2Cost)}</Num>
-        {summary.totalInvestment > 0 && (
+        {summary.totalCostShareOfRisk !== null && summary.totalInvestment > 0 && (
           <>
             {' '}
-            · protege <Num>{formatMultiple(summary.protectionRatio)}</Num> o investimento
+            · <Num>{formatShareOfRisk(summary.totalCostShareOfRisk)}</Num> da faturação em risco
           </>
         )}
       </Cell>
@@ -106,6 +113,7 @@ function Num({ children }: { children: ReactNode }) {
 function Cell({
   label,
   value,
+  valueTitle,
   valueClass,
   badge,
   testId,
@@ -113,6 +121,7 @@ function Cell({
 }: {
   label: string;
   value: string;
+  valueTitle?: string;
   valueClass?: string;
   badge?: ReactNode;
   testId?: string;
@@ -121,7 +130,11 @@ function Cell({
   return (
     <div className="min-w-0 bg-white px-4 py-3">
       <p className="text-2xs font-medium uppercase tracking-wide text-slate-600">{label}</p>
-      <p data-testid={testId} className={cn('mt-1 font-mono text-2xl font-semibold tabular-nums tracking-tight', valueClass ?? 'text-slate-900')}>
+      <p
+        data-testid={testId}
+        title={valueTitle}
+        className={cn('mt-1 font-mono text-2xl font-semibold tabular-nums tracking-tight', valueClass ?? 'text-slate-900')}
+      >
         {value}
       </p>
       {badge && <div className="mt-1">{badge}</div>}

@@ -28,12 +28,15 @@ import { errorMessage } from '@/lib/api';
 import {
   DOMAIN_LABELS,
   EXECUTOR_LABELS,
-  PHASE_LABELS,
+  PHASE_SHORT_LABELS,
   PRIORITY_LABELS,
   ROLE_LABELS,
   STATUS_LABELS,
+  formatDatePt,
+  phaseLabel,
+  phaseWindowText,
 } from '@/lib/formatters';
-import { canEditProposalTerms, requiredByFromDescription } from './task-rules';
+import { canEditProposalTerms, isAfterPhaseWindow, phaseEndDate, requiredByFromDescription } from './task-rules';
 
 interface FormState {
   title: string;
@@ -100,10 +103,12 @@ interface TaskSheetFormProps {
   /** null cria uma tarefa nova. */
   task: Task | null;
   assessmentId: string;
+  /** Dia do diagnóstico: as janelas das fases contam a partir daqui. */
+  baseDate: string;
   staff: boolean;
 }
 
-export function TaskSheetForm({ open, onOpenChange, task, assessmentId, staff }: TaskSheetFormProps) {
+export function TaskSheetForm({ open, onOpenChange, task, assessmentId, baseDate, staff }: TaskSheetFormProps) {
   const users = useAssignableUsers();
   const update = useUpdateTask(assessmentId);
   const create = useCreateTask(assessmentId);
@@ -212,6 +217,12 @@ export function TaskSheetForm({ open, onOpenChange, task, assessmentId, staff }:
                 />
               </Field>
             </div>
+            {isAfterPhaseWindow({ deadline: form.deadline || null, phase: form.phase }, baseDate) && (
+              <FieldHint className="font-medium text-amber-800">
+                Prazo depois do fim da {PHASE_SHORT_LABELS[form.phase]} ({formatDatePt(phaseEndDate(baseDate, form.phase))}). A
+                proposta apresenta esta fase como {phaseWindowText(form.phase)}.
+              </FieldHint>
+            )}
 
             <Field label="Responsável" htmlFor="task-assignee">
               <Select
@@ -267,7 +278,7 @@ export function TaskSheetForm({ open, onOpenChange, task, assessmentId, staff }:
                 <Select id="task-phase" value={form.phase} disabled={!termsEditable} onChange={(e) => set('phase', e.target.value as TaskPhase)}>
                   {TASK_PHASES.map((phase) => (
                     <option key={phase} value={phase}>
-                      {PHASE_LABELS[phase]}
+                      {phaseLabel(phase)} ({phaseWindowText(phase)})
                     </option>
                   ))}
                 </Select>

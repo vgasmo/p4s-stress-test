@@ -1,7 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useMemo, useState } from 'react';
 import type { AssessmentDetail } from '@engine/models/api.types';
-import type { StressTestInput } from '@engine/services/requirements.catalog';
+import type { Catalog, StressTestInput } from '@engine/services/requirements';
 import { StressTestCalculatorService, type StressTestResult } from '@engine/services/stress-test-calculator.service';
 import { TaskGeneratorService, type GeneratedTaskDraft } from '@engine/services/task-generator.service';
 import { todayInLisbon } from '@engine/utils/dates';
@@ -9,8 +9,21 @@ import { api, type CreateAssessmentPayload } from '@/lib/api';
 import { sessionStore, useSession } from '@/lib/session';
 import { tasksKey } from './useTasks';
 
-const calculator = new StressTestCalculatorService();
 const generator = new TaskGeneratorService();
+
+/**
+ * Catálogo (pesos, pisos, preços, prazos). Vem da API e só para quem tem sessão: não
+ * está no código público. Muda com a versão da aplicação, por isso não se volta a pedir.
+ */
+export function useCatalog() {
+  const session = useSession();
+  return useQuery({
+    queryKey: ['catalog', session?.user.id],
+    queryFn: api.getCatalog,
+    enabled: session !== null,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
 
 export interface LocalPreview {
   result: StressTestResult;
@@ -19,18 +32,50 @@ export interface LocalPreview {
 
 /**
  * Cálculo em memória com o mesmo motor da API: o preview responde no mesmo frame,
- * funciona sem rede e dá exatamente o número que fica gravado.
+ * funciona sem rede e dá exatamente o número que fica gravado. Null enquanto não há catálogo.
  */
-export function useStressTestPreview(input: StressTestInput): LocalPreview | { error: string } {
+export function useStressTestPreview(
+  input: StressTestInput,
+  catalog: Catalog | undefined,
+): LocalPreview | { error: string } | null {
+  const calculator = useMemo(() => (catalog ? new StressTestCalculatorService(catalog) : null), [catalog]);
   const key = JSON.stringify(input);
   return useMemo(() => {
+    if (!calculator) return null;
     try {
       const result = calculator.calculate(input);
       return { result, suggestedTasks: generator.generate(result.gaps, todayInLisbon()) };
     } catch (error) {
       return { error: error instanceof Error ? error.message : 'Dados inválidos.' };
     }
-  }, [key]);
+    // O input é comparado pelo conteúdo (key), não pela identidade do objeto.
+  }, [calculator, key]);
+}
+
+function useDebounced<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  const key = JSON.stringify(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(timer);
+    // O valor é comparado pelo conteúdo (key).
+  }, [key, delayMs]);
+  return debounced;
+}
+
+/**
+ * Simulação sem sessão: o servidor devolve ordens de grandeza por escalões. O pedido
+ * espera 250 ms depois da última alteração e mantém o resultado anterior no ecrã.
+ */
+export function usePublicSimulation(input: StressTestInput, enabled: boolean) {
+  const debounced = useDebounced(input, 250);
+  return useQuery({
+    queryKey: ['public-simulation', debounced],
+    queryFn: ({ signal }) => api.simulatePublic(debounced, signal),
+    enabled,
+    placeholderData: keepPreviousData,
+    staleTime: 60_000,
+  });
 }
 
 export const assessmentKey = (companyId: string | null | undefined, id: string) => ['assessment', companyId, id] as const;

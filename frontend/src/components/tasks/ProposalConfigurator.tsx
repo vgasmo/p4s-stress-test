@@ -13,16 +13,22 @@ import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, Table
 import {
   DOMAIN_LABELS,
   EXECUTOR_SHORT_LABELS,
-  PHASE_LABELS,
   PHASE_SHORT_LABELS,
-  PHASE_WINDOWS,
   STATUS_LABELS,
   formatDatePt,
   formatEUR,
+  phaseLabel,
+  phaseWindowText,
 } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
 import { PriorityBadge, pricedExecutorFor } from './TaskBadges';
-import { canEditProposalTerms, isOverdue, requiredByFromDescription } from './task-rules';
+import {
+  canEditProposalTerms,
+  isAfterPhaseWindow,
+  isOverdue,
+  phaseEndDate,
+  requiredByFromDescription,
+} from './task-rules';
 
 const PHASES: TaskPhase[] = ['phase_1_urgent', 'phase_2_structural'];
 
@@ -47,12 +53,14 @@ interface ProposalConfiguratorProps {
   allTasks: Task[];
   staff: boolean;
   today: string;
+  /** Dia do diagnóstico: as janelas das fases contam a partir daqui. */
+  baseDate: string;
   onPatch: (task: Task, patch: UpdateTaskInput) => void;
   onOpen: (task: Task) => void;
 }
 
-export function ProposalConfigurator({ tasks, allTasks, staff, today, onPatch, onOpen }: ProposalConfiguratorProps) {
-  const summary = summarizeRemediation(allTasks, 0, 0);
+export function ProposalConfigurator({ tasks, allTasks, staff, today, baseDate, onPatch, onOpen }: ProposalConfiguratorProps) {
+  const summary = summarizeRemediation(allTasks, 0);
 
   return (
     <div className="space-y-5">
@@ -60,10 +68,11 @@ export function ProposalConfigurator({ tasks, allTasks, staff, today, onPatch, o
         const rows = tasks.filter((task) => task.phase === phase);
         const subtotal = phase === 'phase_1_urgent' ? summary.phase1Cost : summary.phase2Cost;
         return (
-          <section key={phase} aria-label={PHASE_LABELS[phase]} className="overflow-hidden rounded-md border border-slate-200">
+          <section key={phase} aria-label={phaseLabel(phase)} className="overflow-hidden rounded-md border border-slate-200">
             <div className="flex items-baseline justify-between gap-3 bg-slate-50 px-3 py-2">
               <h3 className="text-xs font-semibold text-slate-900">
-                {PHASE_LABELS[phase]} <span className="font-mono font-normal tabular-nums text-slate-600">· {PHASE_WINDOWS[phase]}</span>
+                {phaseLabel(phase)}{' '}
+                <span className="font-mono font-normal tabular-nums text-slate-600">· {phaseWindowText(phase)}</span>
               </h3>
               <p className="text-xs text-slate-700">
                 Investimento {PHASE_SHORT_LABELS[phase]}{' '}
@@ -93,7 +102,15 @@ export function ProposalConfigurator({ tasks, allTasks, staff, today, onPatch, o
                 </TableHeader>
                 <TableBody>
                   {rows.map((task) => (
-                    <ConfiguratorRow key={task.id} task={task} staff={staff} today={today} onPatch={onPatch} onOpen={onOpen} />
+                    <ConfiguratorRow
+                      key={task.id}
+                      task={task}
+                      staff={staff}
+                      today={today}
+                      baseDate={baseDate}
+                      onPatch={onPatch}
+                      onOpen={onOpen}
+                    />
                   ))}
                 </TableBody>
                 <TableFooter>
@@ -120,12 +137,14 @@ function ConfiguratorRow({
   task,
   staff,
   today,
+  baseDate,
   onPatch,
   onOpen,
 }: {
   task: Task;
   staff: boolean;
   today: string;
+  baseDate: string;
   onPatch: (task: Task, patch: UpdateTaskInput) => void;
   onOpen: (task: Task) => void;
 }) {
@@ -134,6 +153,7 @@ function ConfiguratorRow({
   const requiredBy = requiredByFromDescription(task.description);
   const priced = pricedExecutorFor(task.domain);
   const overdue = isOverdue(task, today);
+  const afterPhase = isAfterPhaseWindow(task, baseDate);
   const lockedTitle = editable ? undefined : 'Termos definidos pela P4S';
 
   return (
@@ -186,6 +206,14 @@ function ConfiguratorRow({
       <TableCell numeric className={cn('text-xs', overdue ? 'font-semibold text-rose-700' : 'text-slate-900')}>
         {formatDatePt(task.deadline)}
         {overdue && <span className="sr-only"> (em atraso)</span>}
+        {afterPhase && (
+          <span
+            className="block font-sans text-2xs font-medium text-amber-800"
+            title={`A ${PHASE_SHORT_LABELS[task.phase]} termina a ${formatDatePt(phaseEndDate(baseDate, task.phase))} (${phaseWindowText(task.phase)}).`}
+          >
+            depois da {PHASE_SHORT_LABELS[task.phase]}
+          </span>
+        )}
       </TableCell>
       <TableCell>
         <Select

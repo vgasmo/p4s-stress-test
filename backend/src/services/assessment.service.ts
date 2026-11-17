@@ -41,6 +41,9 @@ function snapshotRequirements(result: StressTestResult): RequirementSnapshot[] {
     channel: requirement.channel,
     status,
     weightPoints,
+    ...(CATALOG.parameters[requirement.code].evidence
+      ? { evidence: CATALOG.parameters[requirement.code].evidence }
+      : {}),
     requiredBy: [...requirement.requiredBy],
     requiredByLabel: describeSources(requirement.requiredBy),
     solution: {

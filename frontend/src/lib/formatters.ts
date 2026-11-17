@@ -10,11 +10,18 @@ import type {
   UserRole,
 } from '@engine/models/domain';
 import { SECTOR_PROFILE_LABELS } from '@engine/models/domain';
-import { formatEUR, formatNumberPt, formatPercent } from '@engine/utils/currency';
+import { PHASE_WINDOWS, phaseWindowText } from '@engine/services/requirements';
+import { formatEUR, formatMagnitudeEUR, formatNumberPt, formatPercent } from '@engine/utils/currency';
 
-export { formatEUR, formatNumberPt, formatPercent } from '@engine/utils/currency';
+export {
+  formatApproxEUR,
+  formatEUR,
+  formatMagnitudeEUR,
+  formatNumberPt,
+  formatPercent,
+} from '@engine/utils/currency';
 export { addDays, daysBetween, formatDatePt, todayInLisbon } from '@engine/utils/dates';
-export { SECTOR_PROFILE_LABELS };
+export { PHASE_WINDOWS, SECTOR_PROFILE_LABELS, phaseWindowText };
 
 export const EXECUTOR_LABELS: Record<TaskExecutor, string> = {
   p4s: 'P4S',
@@ -50,19 +57,12 @@ export const DOMAIN_LABELS: Record<TaskDomain, string> = {
   circular_economy: 'Economia circular',
 };
 
-export const PHASE_LABELS: Record<TaskPhase, string> = {
-  phase_1_urgent: 'Fase 1 · Desbloqueio imediato',
-  phase_2_structural: 'Fase 2 · Estruturação',
-};
+/** Nome da fase. As janelas («0–60 dias») vêm do motor, de onde saem também os prazos. */
+export const phaseLabel = (phase: TaskPhase) => PHASE_WINDOWS[phase].label;
 
 export const PHASE_SHORT_LABELS: Record<TaskPhase, string> = {
   phase_1_urgent: 'Fase 1',
   phase_2_structural: 'Fase 2',
-};
-
-export const PHASE_WINDOWS: Record<TaskPhase, string> = {
-  phase_1_urgent: '0–60 dias',
-  phase_2_structural: '60–120 dias',
 };
 
 export const ROLE_LABELS: Record<UserRole, string> = {
@@ -73,10 +73,16 @@ export const ROLE_LABELS: Record<UserRole, string> = {
 
 export const sectorLabel = (sector: SectorProfile) => SECTOR_PROFILE_LABELS[sector];
 
-export const formatPerYear = (value: number) => `+${formatEUR(value)}/ano`;
+/** Sobrecusto anual estimado, como ordem de grandeza: «≈ +10 mil €/ano». */
+export const formatApproxPerYear = (value: number) =>
+  value > 0 ? `≈\u00A0+${formatMagnitudeEUR(value)}/ano` : `${formatEUR(0)}/ano`;
 
-/** 252,6× */
-export const formatMultiple = (value: number) => `${formatNumberPt(value, value >= 100 ? 0 : 1)}×`;
+/** Escalão em euros: «780 mil € a 1,2 M €», ou «até 240 mil €» quando começa em zero. */
+export const formatEuroRange = (low: number, high: number) =>
+  low > 0 ? `${formatMagnitudeEUR(low)} a ${formatMagnitudeEUR(high)}` : `até ${formatMagnitudeEUR(high)}`;
+
+/** Valor calculado, para quem quer ver o número por trás da ordem de grandeza. */
+export const exactValueTitle = (value: number, suffix = '') => `Valor calculado: ${formatEUR(value)}${suffix}`;
 
 /** Pontos de peso → «+0,45». */
 export const formatWeight = (points: number) => `+${formatNumberPt(points / 100, 2)}`;
