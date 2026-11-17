@@ -5,9 +5,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Stress test de qualificação de fornecedores da Plan4Sustain" />
     <title>Stress Test de Qualificação · Plan4Sustain</title>
+    <style>
+      .boot-fallback {
+        max-width: 36rem;
+        margin: 3rem auto;
+        padding: 0 1rem;
+        font: 14px/1.5 system-ui, sans-serif;
+        color: #334155;
+        opacity: 0;
+        animation: boot-fallback 0s 4s forwards;
+      }
+      @keyframes boot-fallback {
+        to {
+          opacity: 1;
+        }
+      }
+    </style>
   </head>
   <body class="bg-slate-50 text-slate-900 antialiased">
-    <div id="root"></div>
+    <div id="root">
+      <!-- Só fica à vista se a aplicação não chegar a arrancar (por exemplo, aberta por HTTP fora
+           do próprio computador, em que o browser pede os ficheiros por HTTPS e não os recebe). -->
+      <p class="boot-fallback">
+        A aplicação está a demorar a carregar. Se abriu este endereço por HTTP fora do próprio computador, tem de
+        usar HTTPS. Caso contrário, recarregue a página.
+      </p>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
