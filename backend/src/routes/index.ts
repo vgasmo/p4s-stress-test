@@ -4,6 +4,7 @@ import { authRoutes } from './auth.routes.js';
 import { catalogRoutes } from './catalog.routes.js';
 import { companyRoutes } from './company.routes.js';
 import { taskRoutes } from './task.routes.js';
+import { userRoutes } from './user.routes.js';
 
 /** /api/v1 */
 export function apiRouter(): Router {
@@ -13,5 +14,6 @@ export function apiRouter(): Router {
   router.use('/assessments', assessmentRoutes());
   router.use('/tasks', taskRoutes());
   router.use('/companies', companyRoutes());
+  router.use('/users', userRoutes());
   return router;
 }

@@ -41,7 +41,7 @@ export interface Fixture {
 }
 
 export async function seedFixture(): Promise<Fixture> {
-  await pool.query('TRUNCATE tasks, assessments, users, companies RESTART IDENTITY CASCADE');
+  await pool.query('TRUNCATE password_tokens, tasks, assessments, users, companies RESTART IDENTITY CASCADE');
   const passwordHash = await bcrypt.hash(PASSWORD, 4);
 
   const companyA = await companyModel.insert(pool, {
@@ -62,7 +62,7 @@ export async function seedFixture(): Promise<Fixture> {
   });
 
   const user = (email: string, role: User['role'], companyId: string | null, fullName: string) =>
-    userModel.insert(pool, { email, role, companyId, fullName, passwordHash });
+    userModel.insert(pool, { email, role, companyId, fullName, passwordHash, hasPassword: true });
 
   const admin = await user('admin@p4s.test', 'admin', null, 'Admin P4S');
   const consultant = await user('consultora@p4s.test', 'consultant', null, 'Consultora P4S');

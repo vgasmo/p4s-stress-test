@@ -18,6 +18,8 @@ const refreshClaimsSchema = z.object({
   typ: z.literal('refresh'),
   userId: z.guid(),
   companyId: z.guid().nullable(),
+  // Versão da sessão. Tokens emitidos antes de existir contam como versão 0.
+  tv: z.number().int().nonnegative().default(0),
 });
 
 export type RefreshClaims = z.infer<typeof refreshClaimsSchema>;
@@ -30,9 +32,12 @@ export function signAccessToken(user: AuthUser): string {
   );
 }
 
-/** O refresh não leva o papel: é relido da base de dados em cada renovação. */
-export function signRefreshToken(userId: string, companyId: string | null): string {
-  return jwt.sign({ typ: 'refresh', userId, companyId }, env.JWT_SECRET, {
+/**
+ * O refresh não leva o papel: é relido da base de dados em cada renovação. Leva a versão
+ * da sessão (users.token_version), que sobe quando a palavra-passe muda ou a conta é desativada.
+ */
+export function signRefreshToken(userId: string, companyId: string | null, tokenVersion: number): string {
+  return jwt.sign({ typ: 'refresh', userId, companyId, tv: tokenVersion }, env.JWT_SECRET, {
     algorithm: ALGORITHM,
     issuer: ISSUER,
     subject: userId,

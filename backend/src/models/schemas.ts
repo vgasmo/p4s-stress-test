@@ -6,6 +6,7 @@ import { isValidIsoDate } from '../utils/dates.js';
 import { isValidCae, isValidNif } from '../utils/validation.js';
 import {
   SECTOR_PROFILES,
+  STAFF_ROLES,
   TASK_DOMAINS,
   TASK_EXECUTORS,
   TASK_PHASES,
@@ -41,6 +42,46 @@ export const refreshSchema = z.strictObject({
   companyId: id.nullable().optional(),
 });
 export type RefreshInput = z.infer<typeof refreshSchema>;
+
+/** bcrypt só usa os primeiros 72 bytes: palavras-passe mais compridas seriam cortadas em silêncio. */
+export const PASSWORD_MIN_LENGTH = 10;
+const password = z
+  .string()
+  .min(PASSWORD_MIN_LENGTH, `A palavra-passe tem de ter pelo menos ${PASSWORD_MIN_LENGTH} caracteres.`)
+  .refine((value) => new TextEncoder().encode(value).length <= 72, 'A palavra-passe é demasiado comprida (máximo 72 bytes).');
+const passwordToken = z.string().min(20, 'Link inválido.').max(200, 'Link inválido.');
+
+export const inspectPasswordLinkSchema = z.strictObject({ token: passwordToken });
+export type InspectPasswordLinkInput = z.infer<typeof inspectPasswordLinkSchema>;
+
+export const setPasswordSchema = z.strictObject({ token: passwordToken, password });
+export type SetPasswordInput = z.infer<typeof setPasswordSchema>;
+
+export const changePasswordSchema = z.strictObject({
+  currentPassword: z.string().min(1, 'Indique a palavra-passe atual.').max(200),
+  newPassword: password,
+});
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+
+// Utilizadores
+
+const email = z.string().trim().toLowerCase().max(255).pipe(z.email('Email inválido.'));
+const fullName = z.string().trim().min(2, 'Nome demasiado curto.').max(150);
+
+export const createUserSchema = z.strictObject({
+  email,
+  fullName,
+  /** Por omissão, utilizador da empresa selecionada. Papéis da equipa P4S só por administradores. */
+  role: z.enum(['company_user', ...STAFF_ROLES]).default('company_user'),
+});
+export type CreateUserInput = z.infer<typeof createUserSchema>;
+
+export const updateUserSchema = z
+  .strictObject({ fullName: fullName.optional(), isActive: z.boolean().optional() })
+  .refine((patch) => patch.fullName !== undefined || patch.isActive !== undefined, {
+    message: 'Indique pelo menos um campo a alterar.',
+  });
+export type UpdateUserInput = z.infer<typeof updateUserSchema>;
 
 // Empresas
 

@@ -21,7 +21,7 @@ const getDummyHash = () => (dummyHash ??= bcrypt.hash('p4s-timing-equalizer', en
  * company_user fica sempre na sua empresa. A equipa P4S escolhe a empresa
  * (undefined mantém a atual, null limpa).
  */
-async function resolveCompanyScope(user: User, requested: string | null | undefined): Promise<string | null> {
+export async function resolveCompanyScope(user: User, requested: string | null | undefined): Promise<string | null> {
   if (user.role === 'company_user') {
     if (requested && requested !== user.companyId) throw forbidden('Sem acesso a esta empresa.');
     return user.companyId;
@@ -33,10 +33,10 @@ async function resolveCompanyScope(user: User, requested: string | null | undefi
   return company.id;
 }
 
-function issueSession(user: User, companyId: string | null): AuthSession {
+export function issueSession(user: User, companyId: string | null): AuthSession {
   return {
     accessToken: signAccessToken({ userId: user.id, companyId, role: user.role }),
-    refreshToken: signRefreshToken(user.id, companyId),
+    refreshToken: signRefreshToken(user.id, companyId, user.tokenVersion),
     tokenType: 'Bearer',
     expiresIn: env.JWT_ACCESS_TTL_SECONDS,
     user: toPublicUser(user),
@@ -49,14 +49,17 @@ export const authService = {
     const user = await userModel.findByEmail(pool, input.email);
     const passwordOk = await bcrypt.compare(input.password, user?.passwordHash ?? (await getDummyHash()));
     if (!user || !passwordOk || !user.isActive) throw unauthorized('Email ou palavra-passe incorretos.');
-    return issueSession(user, await resolveCompanyScope(user, input.companyId));
+    const session = issueSession(user, await resolveCompanyScope(user, input.companyId));
+    await userModel.touchLogin(pool, user.id);
+    return session;
   },
 
   /** Renova a sessão (rotação do refresh) e, para a equipa P4S, permite mudar de empresa. */
   async refresh(input: RefreshInput): Promise<AuthSession> {
     const claims = verifyRefreshToken(input.refreshToken);
     const user = await userModel.findById(pool, claims.userId);
-    if (!user || !user.isActive) throw unauthorized('Sessão inválida.');
+    // A versão muda quando a palavra-passe muda ou a conta é desativada: sessões antigas não se renovam.
+    if (!user || !user.isActive || claims.tv !== user.tokenVersion) throw unauthorized('Sessão inválida.');
     const requested = input.companyId !== undefined ? input.companyId : claims.companyId;
     return issueSession(user, await resolveCompanyScope(user, requested));
   },

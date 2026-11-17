@@ -32,7 +32,14 @@ async function ensureUser(
     return existing;
   }
   const plain = password || generatedPassword();
-  const user = await userModel.insert(pool, { email, fullName, role, companyId, passwordHash: await hashPassword(plain) });
+  const user = await userModel.insert(pool, {
+    email,
+    fullName,
+    role,
+    companyId,
+    passwordHash: await hashPassword(plain),
+    hasPassword: true,
+  });
   console.log(`+ ${role} ${email}${password ? '' : `  (palavra-passe gerada: ${plain})`}`);
   return user;
 }

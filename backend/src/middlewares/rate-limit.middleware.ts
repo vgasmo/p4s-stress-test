@@ -24,6 +24,14 @@ export const refreshLimiter = rateLimit({
   message: tooMany('Demasiados pedidos de sessão. Aguarde uns minutos.'),
 });
 
+/** Links de palavra-passe: são públicos e o token é o segredo, por isso o limite é apertado. */
+export const passwordLinkLimiter = rateLimit({
+  ...base,
+  windowMs: 15 * 60_000,
+  limit: 20,
+  message: tooMany('Demasiadas tentativas. Aguarde 15 minutos.'),
+});
+
 /** A simulação é pública: limite generoso para reuniões, mas não ilimitado. */
 export const simulateLimiter = rateLimit({
   ...base,

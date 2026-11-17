@@ -92,10 +92,15 @@ export interface User {
   fullName: string;
   role: UserRole;
   isActive: boolean;
+  /** Sobe a cada mudança de palavra-passe ou desativação (invalida refresh tokens anteriores). */
+  tokenVersion: number;
+  /** Null: conta criada por convite, ainda sem palavra-passe definida. */
+  passwordSetAt: string | null;
+  lastLoginAt: string | null;
   createdAt: string;
 }
 
-export type PublicUser = Omit<User, 'passwordHash'>;
+export type PublicUser = Omit<User, 'passwordHash' | 'tokenVersion'>;
 
 export interface Assessment {
   id: string;
