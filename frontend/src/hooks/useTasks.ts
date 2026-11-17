@@ -43,7 +43,13 @@ export function useTasks(assessmentId: string | undefined) {
   const select = useCallback((tasks: Task[]) => applyPendingChanges(tasks, pending), [pending]);
   return useQuery({
     queryKey: tasksKey(session?.companyId, assessmentId ?? ''),
-    queryFn: () => api.listTasks(assessmentId as string),
+    queryFn: async () => {
+      const revision = tracker.revision;
+      const tasks = await api.listTasks(assessmentId as string);
+      // Qualquer leitura completa serve para tirar do aviso o que afinal ficou gravado.
+      tracker.acceptRead(revision, tasks);
+      return tasks;
+    },
     enabled: Boolean(session?.companyId && assessmentId),
     select,
   });
