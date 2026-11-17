@@ -294,6 +294,11 @@ export const assessmentService = {
       const baseDate = todayInLisbon();
 
       // A ficha da empresa acompanha o último diagnóstico: é dela que parte o seguinte.
+      // Fica guardado o que lá estava, para se poder repor se este diagnóstico for eliminado.
+      const companyBefore =
+        resolution === 'created'
+          ? undefined
+          : { sectorProfile: company.sectorProfile, annualRevenue: company.annualRevenue };
       if (input.sectorProfile !== company.sectorProfile || input.annualRevenue !== company.annualRevenue) {
         company =
           (await companyModel.update(client, company.id, {
@@ -312,6 +317,7 @@ export const assessmentService = {
         commercialRevenueAtRiskShare: result.commercialRevenueAtRiskShare,
         criticalGapCount: result.criticalGapCount,
         spreadPenaltyBps: CATALOG.spreadPenaltyBps,
+        ...(companyBefore ? { companyBefore } : {}),
         dealbreaker: snapshotDealbreaker(result),
         requirements: snapshotRequirements(result),
       };
@@ -403,7 +409,7 @@ export const assessmentService = {
       const shift = daysBetween(todayInLisbon(new Date(current.proposalIssuedAt)), todayInLisbon());
       const reissued = await assessmentModel.markProposalIssued(client, ctx.companyId, id);
       if (!reissued) throw notFound('Avaliação não encontrada.');
-      if (shift > 0) await taskModel.shiftPendingDeliverables(client, ctx.companyId, id, shift);
+      if (shift > 0) await taskModel.shiftPendingDeliverables(client, ctx.companyId, id, shift, ctx.userId);
 
       const tasks = await taskModel.list(client, ctx.companyId, { assessmentId: id });
       const author = await assessmentModel.conductedByName(client, ctx.companyId, id);
@@ -411,11 +417,42 @@ export const assessmentService = {
     });
   },
 
-  /** Elimina um diagnóstico (de teste ou enganado) e as suas tarefas. */
+  /**
+   * Elimina um diagnóstico (de teste ou enganado) e as suas tarefas. Se era o mais recente da
+   * empresa e a ficha ainda o acompanhava (setor e faturação iguais aos dele), a ficha volta
+   * ao que tinha antes: é dela que parte o diagnóstico seguinte, e os diagnósticos que se
+   * eliminam são precisamente os que têm dados errados. Uma ficha corrigida à mão depois do
+   * diagnóstico fica como está.
+   */
   async remove(ctx: TenantContext, id: string): Promise<void> {
     assertStaff(ctx.role, 'Só a equipa P4S pode eliminar diagnósticos.');
-    const removed = await assessmentModel.remove(pool, ctx.companyId, id);
-    if (!removed) throw notFound('Avaliação não encontrada.');
+    await withTransaction(async (client) => {
+      const doomed = await assessmentModel.findById(client, ctx.companyId, id, { forUpdate: true });
+      if (!doomed) throw notFound('Avaliação não encontrada.');
+      const history = await assessmentModel.listByCompany(client, ctx.companyId);
+      await assessmentModel.remove(client, ctx.companyId, id);
+
+      const snapshot = readSnapshot(doomed);
+      const company = await companyModel.findById(client, ctx.companyId);
+      const followed =
+        snapshot !== null &&
+        company !== null &&
+        history[0]?.id === doomed.id &&
+        company.sectorProfile === doomed.sectorProfile &&
+        company.annualRevenue === snapshot.input.annualRevenue;
+      if (!followed) return;
+
+      // O que a ficha tinha antes. Nos diagnósticos gravados sem esse registo, o que o
+      // diagnóstico anterior lhe deu.
+      const previous = history.slice(1).find((entry) => readSnapshot(entry) !== null);
+      const previousInput = previous ? readSnapshot(previous)?.input : undefined;
+      const restored =
+        snapshot.companyBefore ??
+        (previous && previousInput
+          ? { sectorProfile: previous.sectorProfile, annualRevenue: previousInput.annualRevenue }
+          : undefined);
+      if (restored) await companyModel.update(client, ctx.companyId, restored);
+    });
   },
 
   async list(ctx: TenantContext): Promise<AssessmentListEntry[]> {

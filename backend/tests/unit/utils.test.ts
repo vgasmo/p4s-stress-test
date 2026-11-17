@@ -78,6 +78,12 @@ describe('dates', () => {
   it('usa o dia de Lisboa (hora de verão incluída)', () => {
     expect(todayInLisbon(new Date('2026-11-17T23:30:00Z'))).toBe('2026-11-17');
     expect(todayInLisbon(new Date('2026-07-01T23:30:00Z'))).toBe('2026-07-02');
+    // À volta das mudanças de hora: 25/10/2026 (fim da hora de verão) e 28/03/2027 (início).
+    expect(todayInLisbon(new Date('2026-10-24T23:30:00Z'))).toBe('2026-10-25');
+    expect(todayInLisbon(new Date('2026-10-25T23:30:00Z'))).toBe('2026-10-25');
+    expect(todayInLisbon(new Date('2026-10-26T00:30:00Z'))).toBe('2026-10-26');
+    expect(todayInLisbon(new Date('2027-03-27T23:30:00Z'))).toBe('2027-03-27');
+    expect(todayInLisbon(new Date('2027-03-28T23:30:00Z'))).toBe('2027-03-29');
   });
 
   it('soma e subtrai dias de calendário', () => {
@@ -108,6 +114,9 @@ describe('validation', () => {
     expect(isSingleLineText('abc\u0000def')).toBe(false);
     expect(isSingleLineText('duas\nlinhas')).toBe(false);
     expect(isSingleLineText('com\ttabulação')).toBe(false);
+    expect(isSingleLineText('separador\u2028de linha')).toBe(false);
+    expect(isSingleLineText('texto \u202Einvertido')).toBe(false);
+    expect(isPlainText('texto \u2066isolado\u2069')).toBe(false);
   });
 
   it('descrições aceitam quebras de linha, mas não outros caracteres de controlo', () => {

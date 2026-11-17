@@ -182,7 +182,7 @@ describe('recuperação e alteração de palavra-passe', () => {
     expect((await tryLogin('consultora@p4s.test', NEW_PASSWORD)).status).toBe(200);
   });
 
-  it('mudar a palavra-passe ou sair anula um link de recuperação que estivesse por usar', async () => {
+  it('mudar a palavra-passe anula um link de recuperação por usar, e sair não', async () => {
     const consultant = await login('consultora@p4s.test', fx.companyA.id);
 
     // Mudar a palavra-passe.
@@ -200,12 +200,29 @@ describe('recuperação e alteração de palavra-passe', () => {
     const current = await tryLogin('gestor@empresa-a.test', NEW_PASSWORD);
     expect(current.status).toBe(200);
 
-    // Sair.
+    // Sair não o anula: quem pediu o link por se ter esquecido da palavra-passe pode estar
+    // a sair de uma sessão que ainda tinha aberta noutro dispositivo.
     const second = await newLink(consultant, fx.userA.id);
     await request(app).post('/api/v1/auth/logout').send({ refreshToken: current.body.refreshToken }).expect(204);
-    expect((await inspect(second.token)).status).toBe(400);
-    expect((await setPassword(second.token, 'Palavra-passe-do-atacante-789')).status).toBe(400);
-    expect((await tryLogin('gestor@empresa-a.test', NEW_PASSWORD)).status).toBe(200);
+    expect((await inspect(second.token)).status).toBe(200);
+    expect((await setPassword(second.token, 'Palavra-passe-nova-pelo-link-789')).status).toBe(200);
+  });
+
+  it('usar um link ao mesmo tempo que a equipa gera outro ou desativa a conta nunca acaba em erro interno', async () => {
+    const consultant = await login('consultora@p4s.test', fx.companyA.id);
+    for (let round = 0; round < 12; round += 1) {
+      const link = await newLink(consultant, fx.userA.id);
+      const adminSide =
+        round % 2 === 0
+          ? request(app).post(`/api/v1/users/${fx.userA.id}/password-link`).set(bearer(consultant))
+          : request(app).put(`/api/v1/users/${fx.userA.id}`).set(bearer(consultant)).send({ isActive: false });
+      const [used, managed] = await Promise.all([setPassword(link.token, `Palavra-passe-da-ronda-${round}`), adminSide]);
+
+      // Ganha um ou ganha o outro. O que não pode acontecer é ficarem à espera um do outro.
+      expect([200, 400], `ronda ${round}: definir a palavra-passe`).toContain(used.status);
+      expect([200, 201], `ronda ${round}: pedido da equipa`).toContain(managed.status);
+      await request(app).put(`/api/v1/users/${fx.userA.id}`).set(bearer(consultant)).send({ isActive: true }).expect(200);
+    }
   });
 
   it('trocar a palavra-passe exige sessão', async () => {

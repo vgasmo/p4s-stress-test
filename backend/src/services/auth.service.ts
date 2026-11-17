@@ -5,7 +5,6 @@ import { nowInSeconds, signAccessToken, signRefreshToken, verifyRefreshToken } f
 import type { AuthSession, MeResponse } from '../models/api.types.js';
 import { companyModel } from '../models/company.model.js';
 import type { AuthUser, User } from '../models/domain.js';
-import { passwordTokenModel } from '../models/password-token.model.js';
 import type { LoginInput, RefreshInput } from '../models/schemas.js';
 import { toPublicUser, userModel } from '../models/user.model.js';
 import { forbidden, notFound, unauthorized } from '../utils/errors.js';
@@ -75,10 +74,11 @@ export const authService = {
   },
 
   /**
-   * Termina a sessão em todos os dispositivos: os tokens emitidos até agora deixam de valer,
-   * e os links de palavra-passe por usar também. Quem sai identifica-se com o refresh token,
-   * que vale enquanto a sessão existir. O token de acesso expira ao fim de minutos: exigi-lo
-   * deixava «Sair» sem efeito no servidor depois de um intervalo sem pedidos.
+   * Termina a sessão em todos os dispositivos: os tokens emitidos até agora deixam de valer.
+   * Quem sai identifica-se com o refresh token, que vale enquanto a sessão existir. O token de
+   * acesso expira ao fim de minutos: exigi-lo deixava «Sair» sem efeito no servidor depois de
+   * um intervalo sem pedidos. Um link de palavra-passe por usar continua válido: quem o pediu
+   * por se ter esquecido da palavra-passe pode estar a sair de uma sessão que ainda tinha aberta.
    */
   async logout(refreshToken: string): Promise<void> {
     const claims = verifyRefreshToken(refreshToken);
@@ -86,7 +86,6 @@ export const authService = {
       const user = await userModel.findById(client, claims.userId, { forUpdate: true });
       if (!user || claims.tokenVersion !== user.tokenVersion) throw unauthorized('Sessão inválida ou expirada.');
       await userModel.revokeSessions(client, user.id);
-      await passwordTokenModel.deleteUnusedForUser(client, user.id);
     });
   },
 

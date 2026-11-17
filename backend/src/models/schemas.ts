@@ -35,10 +35,12 @@ const id = z.guid('Identificador inválido.');
 const money = z
   .number()
   .nonnegative('Não pode ser negativo.')
-  .max(MAX_MONEY_AMOUNT, `Máximo ${formatEUR(MAX_MONEY_AMOUNT)}.`);
+  .max(MAX_MONEY_AMOUNT, `Máximo ${formatEUR(MAX_MONEY_AMOUNT, 2)}.`);
 /** NUMERIC(10, 2) */
 const taskCost = z.number().nonnegative('Não pode ser negativo.').max(99_999_999.99, 'Máximo 99.999.999,99 €.');
 const isoDate = z.string().refine(isValidIsoDate, 'Data inválida (AAAA-MM-DD).');
+/** Prazo de uma tarefa. Limitado a um intervalo com sentido: um prazo no ano 9999 saía da validação ao deslizar. */
+const deadlineDate = isoDate.refine((value) => value >= '2000-01-01' && value <= '2100-12-31', 'O prazo tem de estar entre 2000 e 2100.');
 const share = z.number().min(0, 'Mínimo 0%.').max(100, 'Máximo 100%.');
 const nif = z.string().trim().refine(isValidNif, 'NIF inválido.');
 const cae = z.string().trim().refine(isValidCae, 'CAE inválido (5 dígitos).');
@@ -199,7 +201,7 @@ const taskFields = {
   phase: z.enum(TASK_PHASES),
   includedInProposal: z.boolean(),
   estimatedCost: taskCost,
-  deadline: isoDate.nullable(),
+  deadline: deadlineDate.nullable(),
   assignedUserId: id.nullable(),
 };
 

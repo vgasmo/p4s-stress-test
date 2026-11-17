@@ -213,6 +213,12 @@ export interface AssessmentSnapshot {
   criticalGapCount: number;
   /** Agravamento de spread usado no cálculo. Ausente em diagnósticos anteriores à versão 3. */
   spreadPenaltyBps?: number;
+  /**
+   * Setor e faturação que a ficha da empresa tinha antes deste diagnóstico (a ficha passa a
+   * acompanhá-lo). Serve para os repor se o diagnóstico for eliminado. Ausente quando a empresa
+   * foi criada com o diagnóstico e nos diagnósticos anteriores a este registo.
+   */
+  companyBefore?: { sectorProfile: SectorProfile; annualRevenue: number };
   dealbreaker: DealbreakerSnapshot | null;
   requirements: RequirementSnapshot[];
 }

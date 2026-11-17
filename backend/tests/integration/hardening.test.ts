@@ -221,6 +221,9 @@ describe('pedidos mal formados', () => {
 
     await request(app).put(`/api/v1/tasks/${task.id}`).set(bearer(session)).send({ description: 'x\u0000y' }).expect(400);
     await request(app).put(`/api/v1/tasks/${task.id}`).set(bearer(session)).send({ title: 'duas\nlinhas' }).expect(400);
+    // Separador de linha do Unicode e marcas que invertem a direção do texto.
+    await request(app).put(`/api/v1/tasks/${task.id}`).set(bearer(session)).send({ title: 'duas\u2028linhas' }).expect(400);
+    await request(app).put(`/api/v1/tasks/${task.id}`).set(bearer(session)).send({ title: 'Dossier \u202Eodatrevni' }).expect(400);
     await request(app)
       .post('/api/v1/companies')
       .set(bearer(session))
@@ -232,6 +235,24 @@ describe('pedidos mal formados', () => {
       .set(bearer(session))
       .send({ description: 'Primeiro parágrafo.\n\nSegundo parágrafo.' })
       .expect(200);
+  });
+
+  it('um prazo fora de um intervalo com sentido é recusado, e o teto dos valores diz o valor certo', async () => {
+    const session = await consultantForA();
+    const detail = await createAssessment(session);
+    const task = detail.tasks[0] as Task;
+
+    const farAway = await request(app).put(`/api/v1/tasks/${task.id}`).set(bearer(session)).send({ deadline: '9999-12-31' });
+    expect(farAway.status).toBe(400);
+    expect(farAway.body.error.details).toEqual([{ path: 'deadline', message: 'O prazo tem de estar entre 2000 e 2100.' }]);
+    await request(app).put(`/api/v1/tasks/${task.id}`).set(bearer(session)).send({ deadline: '1999-12-31' }).expect(400);
+    await request(app).put(`/api/v1/tasks/${task.id}`).set(bearer(session)).send({ deadline: '2100-12-31' }).expect(200);
+
+    const tooMuch = await request(app)
+      .post('/api/v1/assessments/simulate')
+      .send({ ...AUTOMOTIVE_ANSWERS, sectorProfile: 'general_industrial', annualRevenue: 1_000_000_000_000 });
+    expect(tooMuch.status).toBe(400);
+    expect(tooMuch.body.error.details[0].message.replace(/\s/g, ' ')).toBe('Máximo 999.999.999.999,99 €.');
   });
 
   it('as mensagens de validação chegam em português', async () => {
@@ -306,15 +327,20 @@ describe('validade da proposta', () => {
   let consultant: AuthSession;
   let client: AuthSession;
   let detail: CreatedAssessment;
-  const today = todayInLisbon();
+  let today: string;
 
+  // Recua por dias de calendário de Lisboa (meio-dia desse dia). Com um intervalo de N vezes
+  // 24 horas, o resultado mudava de dia perto da meia-noite nas semanas a seguir à mudança de hora.
   const backdate = (days: number) =>
-    pool.query(`UPDATE assessments SET proposal_issued_at = proposal_issued_at - make_interval(days => $2) WHERE id = $1`, [
-      detail.id,
-      days,
-    ]);
+    pool.query(
+      `UPDATE assessments
+       SET proposal_issued_at = (((proposal_issued_at AT TIME ZONE 'Europe/Lisbon')::date - $2::int) + time '12:00') AT TIME ZONE 'Europe/Lisbon'
+       WHERE id = $1`,
+      [detail.id, days],
+    );
 
   beforeEach(async () => {
+    today = todayInLisbon();
     consultant = await consultantForA();
     client = await login('gestor@empresa-a.test');
     detail = await createAssessment(consultant);
@@ -370,6 +396,9 @@ describe('validade da proposta', () => {
       const expected = before.id === done.id ? before.deadline : addDays(before.deadline as string, 40);
       expect(after.get(before.id)?.deadline, before.title).toBe(expected);
     }
+    // Fica registado quem deslocou os prazos: a consultora, e não a conta da empresa que só mudou o estado.
+    expect(after.get(started.id)?.updatedBy).toBe(fx.consultant.id);
+    expect(after.get(done.id)?.updatedBy).toBe(fx.consultant.id);
     // Nenhum entregável por concluir fica com prazo anterior à nova data de emissão.
     for (const task of response.body.tasks as Task[]) {
       if (task.status !== 'completed' && task.executorType !== 'internal') {
@@ -446,9 +475,10 @@ describe('lacunas e entregáveis do plano', () => {
   let consultant: AuthSession;
   let client: AuthSession;
   let detail: CreatedAssessment;
-  const today = todayInLisbon();
+  let today: string;
 
   beforeEach(async () => {
+    today = todayInLisbon();
     consultant = await consultantForA();
     client = await login('gestor@empresa-a.test');
     detail = await createAssessment(consultant);
@@ -559,6 +589,50 @@ describe('lacunas e entregáveis do plano', () => {
     await createAssessment(consultant, { ...AUTOMOTIVE_ANSWERS, sectorProfile: 'heavy_process', annualRevenue: 8_250_000 });
     const company = await request(app).get(`/api/v1/companies/${fx.companyA.id}`).set(bearer(consultant)).expect(200);
     expect(company.body).toMatchObject({ sectorProfile: 'heavy_process', annualRevenue: 8_250_000, name: fx.companyA.name });
+  });
+
+  describe('ao eliminar um diagnóstico', () => {
+    const sheet = async () => (await request(app).get(`/api/v1/companies/${fx.companyA.id}`).set(bearer(consultant)).expect(200)).body;
+    const remove = (id: string) => request(app).delete(`/api/v1/assessments/${id}`).set(bearer(consultant)).expect(204);
+    const WRONG = { ...AUTOMOTIVE_ANSWERS, sectorProfile: 'general_industrial', annualRevenue: 25_000_000 };
+
+    it('enganado, a ficha volta ao setor e à faturação que tinha', async () => {
+      const mistaken = await createAssessment(consultant, WRONG);
+      expect(await sheet()).toMatchObject({ sectorProfile: 'general_industrial', annualRevenue: 25_000_000 });
+
+      await remove(mistaken.id);
+
+      expect(await sheet()).toMatchObject({ sectorProfile: 'automotive_molds', annualRevenue: 6_500_000 });
+      // O diagnóstico seguinte volta a partir dos dados certos.
+      const next = await createAssessment(consultant);
+      expect(next.sectorProfile).toBe('automotive_molds');
+      expect(next.snapshot.input.annualRevenue).toBe(6_500_000);
+    });
+
+    it('gravado antes de a ficha anterior ficar registada, a ficha volta ao que o diagnóstico anterior lhe deu', async () => {
+      const mistaken = await createAssessment(consultant, WRONG);
+      await pool.query(`UPDATE assessments SET raw_responses = raw_responses - 'companyBefore' WHERE id = $1`, [mistaken.id]);
+      await remove(mistaken.id);
+      expect(await sheet()).toMatchObject({ sectorProfile: 'automotive_molds', annualRevenue: 6_500_000 });
+    });
+
+    it('a ficha corrigida à mão depois do diagnóstico fica como está', async () => {
+      const mistaken = await createAssessment(consultant, WRONG);
+      await request(app)
+        .put(`/api/v1/companies/${fx.companyA.id}`)
+        .set(bearer(consultant))
+        .send({ annualRevenue: 7_000_000 })
+        .expect(200);
+      await remove(mistaken.id);
+      expect(await sheet()).toMatchObject({ sectorProfile: 'general_industrial', annualRevenue: 7_000_000 });
+    });
+
+    it('que não é o mais recente, a ficha continua a acompanhar o mais recente', async () => {
+      const latest = await createAssessment(consultant, WRONG);
+      await remove(detail.id);
+      expect(await sheet()).toMatchObject({ sectorProfile: 'general_industrial', annualRevenue: 25_000_000 });
+      expect(latest.snapshot.companyBefore).toEqual({ sectorProfile: 'automotive_molds', annualRevenue: 6_500_000 });
+    });
   });
 });
 

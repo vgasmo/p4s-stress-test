@@ -160,9 +160,14 @@ export const userService = {
   /** Público: define a palavra-passe com um link válido e abre a sessão. O link fica gasto. */
   async setPassword(input: SetPasswordInput): Promise<AuthSession> {
     const user = await withTransaction(async (client) => {
-      const stored = await passwordTokenModel.findValidByHash(client, hashToken(input.token), { forUpdate: true });
-      const target = stored ? await userModel.findById(client, stored.userId, { forUpdate: true }) : null;
-      if (!stored || !target || !target.isActive) throw invalidLink();
+      // Bloqueia a conta e só depois o link, pela mesma ordem que gerar um link novo ou
+      // desativar a conta. Pela ordem contrária, dois pedidos em simultâneo ficavam à espera
+      // um do outro e um deles acabava em erro interno.
+      const tokenHash = hashToken(input.token);
+      const found = await passwordTokenModel.findValidByHash(client, tokenHash);
+      const target = found ? await userModel.findById(client, found.userId, { forUpdate: true }) : null;
+      const stored = target ? await passwordTokenModel.findValidByHash(client, tokenHash, { forUpdate: true }) : null;
+      if (!stored || !target || !target.isActive || stored.userId !== target.id) throw invalidLink();
       if (input.password.toLowerCase() === target.email.toLowerCase()) {
         throw badRequest('A palavra-passe não pode ser o email.');
       }
@@ -188,10 +193,12 @@ export const userService = {
     }
     const passwordHash = await hashPassword(input.newPassword);
     const updated = await withTransaction(async (client) => {
-      // Quem muda a palavra-passe por desconfiar de um acesso indevido não pode ficar com um
-      // link de recuperação antigo ainda válido.
+      // A conta primeiro, os links depois (a mesma ordem de bloqueio das outras operações).
+      const changed = await userModel.setPassword(client, user.id, passwordHash);
+      // Quem muda a palavra-passe sabe a que tinha: um link de recuperação por usar deixa de
+      // fazer falta, e não pode ficar à espera de quem o encontrar.
       await passwordTokenModel.deleteUnusedForUser(client, user.id);
-      return userModel.setPassword(client, user.id, passwordHash);
+      return changed;
     });
     if (!updated) throw unauthorized('Sessão inválida.');
     // Mantém a empresa em que a pessoa estava a trabalhar.

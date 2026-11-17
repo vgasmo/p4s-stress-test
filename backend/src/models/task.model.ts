@@ -258,12 +258,18 @@ export const taskModel = {
    * o estado é um campo que a empresa altera, e um clique em «Em curso» deixava o entregável
    * com um prazo anterior à nova data de emissão.
    */
-  async shiftPendingDeliverables(db: Queryable, companyId: string, assessmentId: string, days: number): Promise<number> {
+  async shiftPendingDeliverables(
+    db: Queryable,
+    companyId: string,
+    assessmentId: string,
+    days: number,
+    updatedBy: string,
+  ): Promise<number> {
     const { rowCount } = await db.query(
-      `UPDATE tasks SET deadline = deadline + $3::int, updated_at = CURRENT_TIMESTAMP
+      `UPDATE tasks SET deadline = deadline + $3::int, updated_by = $4, updated_at = CURRENT_TIMESTAMP
        WHERE company_id = $1 AND assessment_id = $2 AND status <> 'completed'
          AND executor_type IN ('p4s', 'partner') AND deadline IS NOT NULL`,
-      [companyId, assessmentId, days],
+      [companyId, assessmentId, days, updatedBy],
     );
     return rowCount ?? 0;
   },

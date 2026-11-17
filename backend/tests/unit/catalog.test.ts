@@ -161,8 +161,19 @@ describe('simulação pública: ordens de grandeza, sem pesos nem preços', () =
     [75, 60, 80],
     [100, 80, 100],
   ])('score %d cai no escalão %d–%d%%', (score, lowShare, highShare) => {
-    const bucket = Math.ceil(score / PUBLIC_EXPOSURE_STEP);
-    expect([(bucket - 1) * PUBLIC_EXPOSURE_STEP, bucket * PUBLIC_EXPOSURE_STEP]).toEqual([lowShare, highShare]);
+    // Passa pela função que responde ao público, com o score que se quer testar.
+    const result = { ...calculator.calculate(NOTHING_IN_PLACE), riskScore: score };
+    const { commercialRisk } = toPublicSimulation(NOTHING_IN_PLACE, result, CATALOG);
+    expect([commercialRisk?.lowShare, commercialRisk?.highShare]).toEqual([lowShare, highShare]);
+    expect((commercialRisk?.highShare ?? 0) - (commercialRisk?.lowShare ?? 0)).toBe(PUBLIC_EXPOSURE_STEP);
+    // Os euros do escalão saem da base exposta: 62% de 6,5 M€.
+    expect(commercialRisk?.low).toBe((4_030_000 * lowShare) / 100);
+    expect(commercialRisk?.high).toBe((4_030_000 * highShare) / 100);
+  });
+
+  it('sem lacunas comerciais não há escalão', () => {
+    const result = { ...calculator.calculate(NOTHING_IN_PLACE), riskScore: 0 };
+    expect(toPublicSimulation(NOTHING_IN_PLACE, result, CATALOG).commercialRisk).toBeNull();
   });
 
   it('pesos diferentes no mesmo escalão dão a mesma resposta pública', () => {

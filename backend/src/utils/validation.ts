@@ -24,9 +24,13 @@ export function isValidCae(value: string): boolean {
   return /^\d{5}$/.test(value);
 }
 
-/** Caracteres de controlo, que a base de dados recusa (NUL) ou que estragam o que se imprime. */
-const CONTROL_CHARACTERS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
-const LINE_BREAKS = /[\t\n\r]/;
+/**
+ * Caracteres de controlo, que a base de dados recusa (NUL) ou que estragam o que se imprime,
+ * incluindo as marcas que invertem a direção do texto.
+ */
+const CONTROL_CHARACTERS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u202A-\u202E\u2066-\u2069]/;
+/** Inclui os separadores de linha e de parágrafo do Unicode, que partem um título em duas linhas. */
+const LINE_BREAKS = /[\t\n\r\u2028\u2029]/;
 
 /** Texto de uma só linha (nomes, títulos): sem caracteres de controlo nem quebras de linha. */
 export function isSingleLineText(value: string): boolean {

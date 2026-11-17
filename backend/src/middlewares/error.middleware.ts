@@ -74,6 +74,13 @@ export const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
     return;
   }
 
+  // Dois pedidos em simultâneo sobre os mesmos registos: a base de dados desfaz um deles.
+  if (code === '40P01' || code === '40001') {
+    console.warn('[api] pedido desfeito por se ter cruzado com outro', code);
+    send(res, 409, { error: { code: 'CONFLICT', message: 'O pedido cruzou-se com outro em simultâneo. Tente novamente.' } });
+    return;
+  }
+
   console.error('[api] erro não tratado', error);
   send(res, 500, { error: { code: 'INTERNAL_ERROR', message: 'Erro interno. Tente novamente.' } });
 };
