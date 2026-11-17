@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { StressTestInput } from '../../src/services/requirements.catalog.js';
+import { CATALOG } from '../../src/services/catalog.private.js';
+import type { StressTestInput } from '../../src/services/requirements.js';
 import {
   StressTestCalculatorService,
   type RequirementEvaluation,
@@ -7,7 +8,7 @@ import {
 import { TaskGeneratorService } from '../../src/services/task-generator.service.js';
 
 const generator = new TaskGeneratorService();
-const calculator = new StressTestCalculatorService();
+const calculator = new StressTestCalculatorService(CATALOG);
 
 const NOTHING_IN_PLACE: StressTestInput = {
   sectorProfile: 'general_industrial',
@@ -92,13 +93,20 @@ describe('TaskGeneratorService, as 5 tarefas-tipo', () => {
   it('cada tarefa tem remetente concreto e indica-o na descrição', () => {
     for (const task of tasks) {
       expect(task.requiredBy.length).toBeGreaterThan(0);
-      expect(task.description).toMatch(/Exigido por: (Cliente industrial|Banco|Diretiva NIS2)/);
+      expect(task.description).toMatch(/Exigido por: (Cliente industrial|Banco)/);
     }
     expect(tasks.find((t) => t.requirementCode === 'banking_esg')?.requiredBy).toEqual(['bank']);
     expect(tasks.find((t) => t.requirementCode === 'information_security')?.requiredBy).toEqual([
       'industrial_client',
-      'nis2_directive',
+      'nis2_if_in_scope',
     ]);
+  });
+
+  it('a NIS2 nunca aparece como obrigação certa', () => {
+    const infosec = tasks.find((t) => t.requirementCode === 'information_security');
+    expect(infosec?.description).toContain('Exigido por: Cliente industrial / NIS2 (se a empresa estiver abrangida).');
+    expect(infosec?.description).toContain('A auditoria confirma se a empresa está abrangida pela NIS2');
+    for (const task of tasks) expect(task.description).not.toMatch(/Diretiva NIS2|Lei NIS2|obrigação legal/i);
   });
 
   it('não gera serviços fora do âmbito fechado', () => {
@@ -107,12 +115,17 @@ describe('TaskGeneratorService, as 5 tarefas-tipo', () => {
     for (const task of tasks) expect(task.title).not.toMatch(outOfScope);
   });
 
-  it('em moldes automóvel, TISAX/NIS2 passa a crítico e Fase 1', () => {
+  it('em moldes automóvel, TISAX/NIS2 passa a crítico, Fase 1 e 60 dias', () => {
     const automotive = calculator.calculate({ ...NOTHING_IN_PLACE, sectorProfile: 'automotive_molds' });
     const infosec = generator
       .generate(automotive.gaps, '2026-11-17')
       .find((t) => t.requirementCode === 'information_security');
-    expect(infosec).toMatchObject({ priority: 'critical', phase: 'phase_1_urgent', executorType: 'partner' });
+    expect(infosec).toMatchObject({
+      priority: 'critical',
+      phase: 'phase_1_urgent',
+      executorType: 'partner',
+      deadline: '2027-01-16', // +60 dias
+    });
   });
 });
 
@@ -148,7 +161,7 @@ describe('TaskGeneratorService, casos-limite', () => {
   it('recusa requisitos sem remetente ou que não são lacuna', () => {
     const [first] = calculator.calculate(NOTHING_IN_PLACE).gaps;
     const gap = first as RequirementEvaluation;
-    const orphan = { ...gap, rule: { ...gap.rule, requiredBy: [] } };
+    const orphan = { ...gap, requirement: { ...gap.requirement, requiredBy: [] } };
     expect(() => generator.generate([orphan], '2026-11-17')).toThrow(/remetente/);
     expect(() => generator.generate([{ ...gap, status: 'compliant' }], '2026-11-17')).toThrow(/não é uma lacuna/);
   });

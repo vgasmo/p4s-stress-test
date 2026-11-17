@@ -6,6 +6,7 @@ import type {
   AssessmentSnapshot,
   CompanySummary,
   DealbreakerSnapshot,
+  FullSimulation,
   RequirementSnapshot,
   SimulationResponse,
 } from '../models/api.types.js';
@@ -23,27 +24,25 @@ import type { CreateAssessmentInput, QuickCompanyInput, SimulateAssessmentInput 
 import { taskModel, type NewTask } from '../models/task.model.js';
 import { todayInLisbon } from '../utils/dates.js';
 import { companyScopeRequired, forbidden, notFound } from '../utils/errors.js';
-import { describeSources, type StressTestInput } from './requirements.catalog.js';
+import { CATALOG } from './catalog.private.js';
+import { toPublicSimulation } from './public-simulation.js';
 import { summarizeRemediation } from './remediation-summary.js';
-import {
-  ENGINE_VERSION,
-  StressTestCalculatorService,
-  type StressTestResult,
-} from './stress-test-calculator.service.js';
+import { describeSources, type StressTestInput } from './requirements.js';
+import { StressTestCalculatorService, type StressTestResult } from './stress-test-calculator.service.js';
 import { TaskGeneratorService, type GeneratedTaskDraft } from './task-generator.service.js';
 
-const calculator = new StressTestCalculatorService();
+const calculator = new StressTestCalculatorService(CATALOG);
 const generator = new TaskGeneratorService();
 
 function snapshotRequirements(result: StressTestResult): RequirementSnapshot[] {
-  return result.evaluations.map(({ rule, status, weightPoints, task }) => ({
-    code: rule.code,
-    label: rule.label,
-    channel: rule.channel,
+  return result.evaluations.map(({ requirement, status, weightPoints, task }) => ({
+    code: requirement.code,
+    label: requirement.label,
+    channel: requirement.channel,
     status,
     weightPoints,
-    requiredBy: [...rule.requiredBy],
-    requiredByLabel: describeSources(rule.requiredBy),
+    requiredBy: [...requirement.requiredBy],
+    requiredByLabel: describeSources(requirement.requiredBy),
     solution: {
       title: task.title,
       executorType: task.executorType,
@@ -67,11 +66,10 @@ function snapshotDealbreaker(result: StressTestResult): DealbreakerSnapshot | nu
   };
 }
 
-/** Diagnóstico em memória, sem gravar nada. */
-export function runSimulation(input: StressTestInput, baseDate: string = todayInLisbon()): SimulationResponse {
-  const result = calculator.calculate(input);
+function toFullSimulation(result: StressTestResult, baseDate: string): FullSimulation {
   return {
-    engineVersion: ENGINE_VERSION,
+    access: 'full',
+    engineVersion: result.catalogVersion,
     sectorProfile: result.sectorProfile,
     riskScore: result.riskScore,
     commercialRevenueAtRisk: result.commercialRevenueAtRisk,
@@ -124,7 +122,7 @@ function buildDetail(assessment: Assessment, company: Company, tasks: Task[]): A
     createdAt: assessment.createdAt,
     company: toCompanySummary(company),
     snapshot: assessment.rawResponses as unknown as AssessmentSnapshot,
-    remediationSummary: summarizeRemediation(tasks, assessment.revenueAtRisk, assessment.estimatedSpreadPenalty),
+    remediationSummary: summarizeRemediation(tasks, assessment.revenueAtRisk),
     tasks,
   };
 }
@@ -159,8 +157,13 @@ async function resolveCompany(
 }
 
 export const assessmentService = {
-  simulate(input: SimulateAssessmentInput): SimulationResponse {
-    return runSimulation(input);
+  /**
+   * Diagnóstico em memória, sem gravar nada. Com sessão devolve o cálculo completo.
+   * Sem sessão devolve só ordens de grandeza, sem pesos nem preços.
+   */
+  simulate(input: SimulateAssessmentInput, authenticated: boolean): SimulationResponse {
+    const result = calculator.calculate(input);
+    return authenticated ? toFullSimulation(result, todayInLisbon()) : toPublicSimulation(input, result, CATALOG);
   },
 
   /** Calcula, grava a avaliação e insere as tarefas numa única transação. */
@@ -183,7 +186,7 @@ export const assessmentService = {
       const baseDate = todayInLisbon();
 
       const snapshot: AssessmentSnapshot = {
-        engineVersion: ENGINE_VERSION,
+        engineVersion: result.catalogVersion,
         baseDate,
         input,
         exposedClientRevenue: result.exposedClientRevenue,
@@ -191,6 +194,7 @@ export const assessmentService = {
         commercialRiskPoints: result.commercialRiskPoints,
         commercialRevenueAtRiskShare: result.commercialRevenueAtRiskShare,
         criticalGapCount: result.criticalGapCount,
+        spreadPenaltyBps: CATALOG.spreadPenaltyBps,
         dealbreaker: snapshotDealbreaker(result),
         requirements: snapshotRequirements(result),
       };

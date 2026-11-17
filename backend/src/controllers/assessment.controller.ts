@@ -5,9 +5,10 @@ import type { CreateAssessmentInput, SimulateAssessmentInput } from '../models/s
 import { assessmentService } from '../services/assessment.service.js';
 
 export const assessmentController = {
-  /** Público: cálculo em memória, nada é gravado. */
+  /** Cálculo em memória, nada é gravado. Sem sessão a resposta vem por escalões. */
   simulate(req: Request, res: Response): void {
-    res.json(assessmentService.simulate(validated<SimulateAssessmentInput>(req, 'body')));
+    const authenticated = req.user !== undefined;
+    res.json(assessmentService.simulate(validated<SimulateAssessmentInput>(req, 'body'), authenticated));
   },
 
   async create(req: Request, res: Response): Promise<void> {

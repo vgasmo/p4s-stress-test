@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { divRoundHalfUp, formatEUR, formatNumberPt, formatPercent } from '../../src/utils/currency.js';
+import {
+  divRoundHalfUp,
+  formatApproxEUR,
+  formatEUR,
+  formatMagnitudeEUR,
+  formatNumberPt,
+  formatPercent,
+  roundToSignificant,
+} from '../../src/utils/currency.js';
 import { addDays, daysBetween, formatDatePt, isValidIsoDate, todayInLisbon } from '../../src/utils/dates.js';
 import { isValidCae, isValidNif } from '../../src/utils/validation.js';
 
@@ -20,6 +28,35 @@ describe('currency', () => {
     expect(formatNumberPt(-1500)).toBe('−1.500');
     expect(formatNumberPt(-0.4)).toBe('0');
     expect(formatNumberPt(Number.NaN)).toBe('—');
+  });
+
+  it('arredonda a 2 algarismos significativos', () => {
+    expect(roundToSignificant(2_827_500)).toBe(2_800_000);
+    expect(roundToSignificant(4_030_000)).toBe(4_000_000);
+    expect(roundToSignificant(785_000)).toBe(790_000);
+    expect(roundToSignificant(14)).toBe(14);
+    expect(roundToSignificant(9)).toBe(9);
+    expect(roundToSignificant(0)).toBe(0);
+  });
+
+  it('apresenta estimativas como ordem de grandeza', () => {
+    expect(formatApproxEUR(2_827_500)).toBe(`≈${NBSP}2,8${NBSP}M${NBSP}€`);
+    expect(formatApproxEUR(4_030_000)).toBe(`≈${NBSP}4${NBSP}M${NBSP}€`);
+    expect(formatApproxEUR(12_400_000)).toBe(`≈${NBSP}12${NBSP}M${NBSP}€`);
+    expect(formatApproxEUR(780_000)).toBe(`≈${NBSP}780${NBSP}mil${NBSP}€`);
+    expect(formatApproxEUR(10_000)).toBe(`≈${NBSP}10${NBSP}mil${NBSP}€`);
+    expect(formatApproxEUR(9_440)).toBe(`≈${NBSP}9.400${NBSP}€`);
+    expect(formatApproxEUR(14)).toBe(`≈${NBSP}14${NBSP}€`);
+    expect(formatApproxEUR(2_500_000_000)).toBe(`≈${NBSP}2,5${NBSP}mil${NBSP}M${NBSP}€`);
+    expect(formatApproxEUR(0)).toBe(`0${NBSP}€`);
+    expect(formatApproxEUR(Number.NaN)).toBe('—');
+  });
+
+  it('formata os limites de um escalão sem sinal de aproximação', () => {
+    expect(formatMagnitudeEUR(3_224_000)).toBe(`3,2${NBSP}M${NBSP}€`);
+    expect(formatMagnitudeEUR(999_999)).toBe(`1${NBSP}M${NBSP}€`);
+    expect(formatMagnitudeEUR(7_500)).toBe(`7.500${NBSP}€`);
+    expect(formatMagnitudeEUR(0)).toBe(`0${NBSP}€`);
   });
 
   it('divide com arredondamento meio-para-cima', () => {

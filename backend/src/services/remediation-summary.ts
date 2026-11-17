@@ -1,6 +1,10 @@
-// Orçamento faseado e rácio de proteção. Função pura usada pelo motor, pela API
-// (plano guardado) e pelo configurador de proposta no frontend, para que o número
-// mostrado na reunião seja sempre o mesmo que fica gravado.
+// Orçamento faseado. Função pura usada pelo motor, pela API (plano guardado) e pelo
+// configurador de proposta no frontend, para que o número mostrado na reunião seja
+// sempre o mesmo que fica gravado.
+//
+// O custo compara-se só com a faturação comercial em risco. Não há um rácio único de
+// «proteção»: somar faturação (um stock), sobrecusto de spread (um custo anual) e dividir
+// por honorários (um custo único) dava um múltiplo sem significado.
 
 import type { TaskExecutor, TaskPhase } from '../models/domain.js';
 import { toCents } from '../utils/currency.js';
@@ -18,10 +22,10 @@ export interface RemediationSummary {
   /** Honorários P4S + parceiro na Fase 2 (€). */
   phase2Cost: number;
   totalInvestment: number;
-  /** (faturação comercial em risco + penalização de spread) / max(1, investimento total). */
-  protectionRatio: number;
   /** Investimento da Fase 1 em % da faturação comercial em risco. Null se nada estiver em risco. */
   phase1CostShareOfRisk: number | null;
+  /** Investimento total em % da faturação comercial em risco. Null se nada estiver em risco. */
+  totalCostShareOfRisk: number | null;
 }
 
 /** Conta para o orçamento: incluído na proposta e executado pela P4S ou pelo parceiro. */
@@ -34,7 +38,6 @@ const round2 = (value: number) => Math.round(value * 100) / 100;
 export function summarizeRemediation(
   lines: readonly ProposalLine[],
   commercialRevenueAtRisk: number,
-  estimatedSpreadPenalty: number,
 ): RemediationSummary {
   let phase1Cents = 0n;
   let phase2Cents = 0n;
@@ -47,13 +50,14 @@ export function summarizeRemediation(
   const phase1Cost = Number(phase1Cents) / 100;
   const phase2Cost = Number(phase2Cents) / 100;
   const totalInvestment = Number(phase1Cents + phase2Cents) / 100;
+  const shareOfRisk = (cost: number) =>
+    commercialRevenueAtRisk > 0 ? round2((cost / commercialRevenueAtRisk) * 100) : null;
 
   return {
     phase1Cost,
     phase2Cost,
     totalInvestment,
-    protectionRatio: round2((commercialRevenueAtRisk + estimatedSpreadPenalty) / Math.max(1, totalInvestment)),
-    phase1CostShareOfRisk:
-      commercialRevenueAtRisk > 0 ? round2((phase1Cost / commercialRevenueAtRisk) * 100) : null,
+    phase1CostShareOfRisk: shareOfRisk(phase1Cost),
+    totalCostShareOfRisk: shareOfRisk(totalInvestment),
   };
 }

@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { SectorProfile } from '../../src/models/domain.js';
-import type { StressTestInput } from '../../src/services/requirements.catalog.js';
+import { CATALOG } from '../../src/services/catalog.private.js';
+import type { StressTestInput } from '../../src/services/requirements.js';
 import {
   MAX_MONEY_AMOUNT,
   StressTestCalculatorService,
 } from '../../src/services/stress-test-calculator.service.js';
 
-const calculator = new StressTestCalculatorService();
+const calculator = new StressTestCalculatorService(CATALOG);
 
 // F_top = 6.500.000 × 62% = 4.030.000 €
 const FULLY_COMPLIANT: StressTestInput = {
@@ -50,8 +51,8 @@ describe('cenários-limite', () => {
       phase1Cost: 0,
       phase2Cost: 0,
       totalInvestment: 0,
-      protectionRatio: 0,
       phase1CostShareOfRisk: null,
+      totalCostShareOfRisk: null,
     });
   });
 
@@ -65,7 +66,7 @@ describe('cenários-limite', () => {
     expect(result.commercialRevenueAtRiskShare).toBe(62);
     // 3.000.000 × 0,40% = 12.000 €/ano, em métrica separada.
     expect(result.estimatedSpreadPenalty).toBe(12_000);
-    expect(result.gaps.map((g) => g.rule.code)).toEqual([
+    expect(result.gaps.map((g) => g.requirement.code)).toEqual([
       'ecovadis',
       'carbon_scope_1_2',
       'carbon_scope_3',
@@ -77,8 +78,8 @@ describe('cenários-limite', () => {
       phase1Cost: 7_700, // EcoVadis 3.500 + Âmbitos 1-2 2.400 + Banca 1.800
       phase2Cost: 8_300, // Âmbito 3 3.800 + TISAX/NIS2 4.500
       totalInvestment: 16_000,
-      protectionRatio: 252.63, // (4.030.000 + 12.000) / 16.000
       phase1CostShareOfRisk: 0.19, // 7.700 / 4.030.000
+      totalCostShareOfRisk: 0.4, // 16.000 / 4.030.000
     });
   });
 
@@ -113,16 +114,20 @@ describe('separação entre risco comercial e risco bancário', () => {
       deadlineDays: 30,
       executorType: 'p4s',
     });
-    expect(result.remediationSummary.protectionRatio).toBe(5.56); // 10.000 / 1.800
-    expect(result.remediationSummary.phase1CostShareOfRisk).toBeNull();
+    // Sem faturação em risco não há percentagem: o custo do dossier não se compara com o spread.
+    expect(result.remediationSummary).toMatchObject({
+      phase1Cost: 1_800,
+      phase1CostShareOfRisk: null,
+      totalCostShareOfRisk: null,
+    });
   });
 
   it('sem crédito a refinanciar, a falta de rácios ESG não conta', () => {
     const result = calculator.calculate({ ...NOTHING_IN_PLACE, creditLineToRefinance: 0 });
 
     expect(result.estimatedSpreadPenalty).toBe(0);
-    expect(result.evaluations.find((e) => e.rule.code === 'banking_esg')?.status).toBe('not_applicable');
-    expect(result.gaps.map((g) => g.rule.code)).not.toContain('banking_esg');
+    expect(result.evaluations.find((e) => e.requirement.code === 'banking_esg')?.status).toBe('not_applicable');
+    expect(result.gaps.map((g) => g.requirement.code)).not.toContain('banking_esg');
     expect(result.commercialRevenueAtRisk).toBe(4_030_000);
   });
 
@@ -168,7 +173,7 @@ describe('pesos setoriais', () => {
     expect(result.commercialRevenueAtRisk).toBe(atRisk);
   });
 
-  it('TISAX/NIS2 é crítico e Fase 1 só em moldes automóvel', () => {
+  it('TISAX/NIS2 é crítico, Fase 1 e a 60 dias só em moldes automóvel', () => {
     const automotive = calculator.calculate(onlyMissing('automotive_molds', { tisaxOrNis2: false }));
     const general = calculator.calculate(onlyMissing('general_industrial', { tisaxOrNis2: false }));
 
@@ -176,8 +181,11 @@ describe('pesos setoriais', () => {
     expect(automotive.gaps[0]?.weightPoints).toBe(35);
     expect(general.gaps[0]?.task).toMatchObject({ priority: 'high', phase: 'phase_2_structural' });
     expect(general.gaps[0]?.weightPoints).toBe(15);
+    // Na Fase 1 (0–60 dias) o prazo tem de caber na janela da fase.
+    expect(automotive.gaps[0]?.task.deadlineDays).toBe(60);
+    expect(general.gaps[0]?.task.deadlineDays).toBe(75);
     for (const result of [automotive, general]) {
-      expect(result.gaps[0]?.task).toMatchObject({ executorType: 'partner', estimatedCost: 4500, deadlineDays: 75 });
+      expect(result.gaps[0]?.task).toMatchObject({ executorType: 'partner', estimatedCost: 4500 });
     }
   });
 });

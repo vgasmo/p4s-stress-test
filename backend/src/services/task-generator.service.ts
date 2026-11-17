@@ -8,7 +8,7 @@ import type {
   TaskStatus,
 } from '../models/domain.js';
 import { addDays, isValidIsoDate } from '../utils/dates.js';
-import { describeSources, type RequirementCode, type RequirementSource } from './requirements.catalog.js';
+import { describeSources, type RequirementCode, type RequirementSource } from './requirements.js';
 import type { RequirementEvaluation } from './stress-test-calculator.service.js';
 
 export interface GeneratedTaskDraft {
@@ -34,17 +34,17 @@ export class TaskGeneratorService {
   generate(gaps: readonly RequirementEvaluation[], baseDate: string): GeneratedTaskDraft[] {
     if (!isValidIsoDate(baseDate)) throw new RangeError(`Data base inválida: ${baseDate}`);
 
-    return gaps.map(({ rule, status, task }) => {
-      if (status !== 'gap') throw new Error(`O requisito ${rule.code} não é uma lacuna.`);
+    return gaps.map(({ requirement, status, task }) => {
+      if (status !== 'gap') throw new Error(`O requisito ${requirement.code} não é uma lacuna.`);
       // Sem remetente concreto não há tarefa (âmbito fechado).
-      if (rule.requiredBy.length === 0) {
-        throw new Error(`O requisito ${rule.code} não tem remetente (cliente, banco ou NIS2).`);
+      if (requirement.requiredBy.length === 0) {
+        throw new Error(`O requisito ${requirement.code} não tem remetente (cliente, banco ou NIS2).`);
       }
       return {
-        requirementCode: rule.code,
-        requiredBy: rule.requiredBy,
+        requirementCode: requirement.code,
+        requiredBy: requirement.requiredBy,
         title: task.title,
-        description: `${task.description}\n\nExigido por: ${describeSources(rule.requiredBy)}.`,
+        description: `${task.description}\n\nExigido por: ${describeSources(requirement.requiredBy)}.`,
         domain: task.domain,
         priority: task.priority,
         status: 'backlog',

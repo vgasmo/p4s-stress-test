@@ -2,7 +2,7 @@ import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { pool } from '../../src/config/database.js';
-import type { AssessmentDetail, AuthSession, SimulationResponse } from '../../src/models/api.types.js';
+import type { AssessmentDetail, AuthSession, FullSimulation, PublicSimulation } from '../../src/models/api.types.js';
 import type { Task } from '../../src/models/domain.js';
 import {
   AUTOMOTIVE_ANSWERS,
@@ -133,14 +133,47 @@ describe('auth', () => {
   });
 });
 
-describe('POST /api/v1/assessments/simulate (público)', () => {
-  it('calcula sem autenticação e devolve o contrato completo', async () => {
-    const response = await request(app)
-      .post('/api/v1/assessments/simulate')
-      .send({ sectorProfile: 'automotive_molds', annualRevenue: 6_500_000, ...AUTOMOTIVE_ANSWERS });
+describe('POST /api/v1/assessments/simulate', () => {
+  const AUTOMOTIVE = { sectorProfile: 'automotive_molds', annualRevenue: 6_500_000, ...AUTOMOTIVE_ANSWERS };
+
+  it('sem sessão devolve só ordens de grandeza, sem pesos nem preços', async () => {
+    const response = await request(app).post('/api/v1/assessments/simulate').send(AUTOMOTIVE);
 
     expect(response.status).toBe(200);
-    const body = response.body as SimulationResponse;
+    const body = response.body as PublicSimulation;
+    expect(Object.keys(body).sort()).toEqual(
+      [
+        'access',
+        'commercialRisk',
+        'criticalGapCount',
+        'engineVersion',
+        'exposedClientRevenue',
+        'gapCount',
+        'gaps',
+        'sectorBlocker',
+        'sectorProfile',
+        'spreadPenalty',
+      ].sort(),
+    );
+    expect(body.access).toBe('public');
+    // Score 100 → escalão 80–100% dos 4.030.000 € expostos.
+    expect(body.commercialRisk).toEqual({ lowShare: 80, highShare: 100, low: 3_224_000, high: 4_030_000 });
+    expect(body.spreadPenalty).toEqual({ lowBps: 25, highBps: 50, low: 7_500, high: 15_000 });
+    expect(body.gapCount).toBe(4);
+    expect(body.sectorBlocker).toMatch(/RFQ/);
+    expect(JSON.stringify(body)).not.toMatch(/weightPoints|floorPoints|estimatedCost|deadline|remediationSummary|riskScore/);
+    expect(body.gaps.map((gap) => Object.keys(gap).sort())).toEqual(
+      body.gaps.map(() => ['code', 'critical', 'executorType', 'label', 'phase', 'requiredByLabel', 'solutionTitle']),
+    );
+  });
+
+  it('com sessão devolve o cálculo completo', async () => {
+    const session = await login('gestor@empresa-a.test');
+    const response = await request(app).post('/api/v1/assessments/simulate').set(bearer(session)).send(AUTOMOTIVE);
+
+    expect(response.status).toBe(200);
+    const body = response.body as FullSimulation;
+    expect(body.access).toBe('full');
     expect(Object.keys(body)).toEqual(
       expect.arrayContaining([
         'riskScore',
@@ -159,8 +192,8 @@ describe('POST /api/v1/assessments/simulate (público)', () => {
       phase1Cost: 9_800, // EcoVadis 3.500 + Banca 1.800 + TISAX (Fase 1 no automóvel) 4.500
       phase2Cost: 3_800,
       totalInvestment: 13_600,
-      protectionRatio: 297.21,
       phase1CostShareOfRisk: 0.24,
+      totalCostShareOfRisk: 0.34,
     });
     expect(body.suggestedTasks.map((t) => t.domain)).toEqual([
       'ecovadis',
@@ -169,6 +202,14 @@ describe('POST /api/v1/assessments/simulate (público)', () => {
       'information_security',
     ]);
     expect(body.requirements).toHaveLength(5);
+  });
+
+  it('um token inválido é recusado em vez de responder como anónimo', async () => {
+    const response = await request(app)
+      .post('/api/v1/assessments/simulate')
+      .set('Authorization', 'Bearer token-invalido')
+      .send(AUTOMOTIVE);
+    expect(response.status).toBe(401);
   });
 
   it('não grava nada', async () => {
@@ -225,8 +266,10 @@ describe('POST /api/v1/assessments (transação atómica)', () => {
 
   it('o resultado gravado coincide com a simulação', async () => {
     const body = { sectorProfile: 'automotive_molds', annualRevenue: 6_500_000, ...AUTOMOTIVE_ANSWERS };
-    const simulation = (await request(app).post('/api/v1/assessments/simulate').send(body)).body as SimulationResponse;
-    const detail = await createAssessmentAs(await login('gestor@empresa-a.test'), body);
+    const session = await login('gestor@empresa-a.test');
+    const simulation = (await request(app).post('/api/v1/assessments/simulate').set(bearer(session)).send(body))
+      .body as FullSimulation;
+    const detail = await createAssessmentAs(session, body);
 
     expect(detail.riskScore).toBe(simulation.riskScore);
     expect(detail.commercialRevenueAtRisk).toBe(simulation.commercialRevenueAtRisk);
@@ -502,6 +545,25 @@ describe('empresas', () => {
     const response = await request(app).get('/api/v1/companies/current/users').set(bearer(session)).expect(200);
     const emails = (response.body as { email: string }[]).map((u) => u.email).sort();
     expect(emails).toEqual(['admin@p4s.test', 'consultora@p4s.test', 'gestor@empresa-a.test']);
+  });
+});
+
+describe('GET /api/v1/catalog (pesos e preços só com sessão)', () => {
+  it('recusa pedidos sem sessão', async () => {
+    const response = await request(app).get('/api/v1/catalog');
+    expect(response.status).toBe(401);
+    expect(JSON.stringify(response.body)).not.toMatch(/weightPoints|estimatedCost/);
+  });
+
+  it('devolve o catálogo a qualquer utilizador com sessão, sem cache partilhada', async () => {
+    for (const email of ['gestor@empresa-a.test', 'consultora@p4s.test']) {
+      const response = await request(app).get('/api/v1/catalog').set(bearer(await login(email)));
+      expect(response.status).toBe(200);
+      expect(response.headers['cache-control']).toMatch(/private/);
+      expect(response.body.spreadPenaltyBps).toBe(40);
+      expect(response.body.parameters.ecovadis.task.estimatedCost).toBe(3500);
+      expect(response.body.dealbreakers).toHaveLength(2);
+    }
   });
 });
 

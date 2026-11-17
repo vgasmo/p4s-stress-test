@@ -11,6 +11,18 @@ export const authenticate: RequestHandler = (req, _res, next) => {
   next();
 };
 
+/**
+ * Sessão opcional: sem cabeçalho Authorization o pedido segue como anónimo. Um token
+ * presente mas inválido é recusado, para não responder como anónimo a quem julga ter sessão.
+ */
+export const authenticateOptional: RequestHandler = (req, res, next) => {
+  if (!req.get('authorization')) {
+    next();
+    return;
+  }
+  authenticate(req, res, next);
+};
+
 /** Exige empresa selecionada no token (tudo o que toca em assessments e tasks). */
 export const requireCompanyScope: RequestHandler = (req, _res, next) => {
   if (!req.user) throw unauthorized();
