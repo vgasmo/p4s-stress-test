@@ -70,7 +70,7 @@ export function ExecutivePrintView({ assessment, tasks }: { assessment: Assessme
         >
           <Meta label="Faturação anual" value={formatEUR(snapshot.input.annualRevenue)} mono />
           <Meta label="Nos 3 maiores clientes" value={formatPercent(snapshot.input.topClientsShare)} mono />
-          <Meta label="Base exposta (faturação nesses clientes)" value={formatEUR(Math.round(snapshot.exposedClientRevenue))} mono />
+          <Meta label="Faturação nesses clientes" value={formatEUR(Math.round(snapshot.exposedClientRevenue))} mono />
           <Meta
             label="Crédito a refinanciar"
             value={assessment.creditLineToRefinance > 0 ? formatEUR(assessment.creditLineToRefinance) : 'Sem'}
@@ -101,7 +101,7 @@ export function ExecutivePrintView({ assessment, tasks }: { assessment: Assessme
           <p className="mt-2 border-l-2 border-rose-700 pl-2 text-[9px] text-slate-800">
             <span className="font-semibold">Bloqueio setorial.</span> {snapshot.dealbreaker.reason}
             {snapshot.dealbreaker.raisedWeight
-              ? ` Por isso considera-se em risco pelo menos ${snapshot.dealbreaker.floorPoints}% da base exposta.`
+              ? ` Por isso considera-se em risco pelo menos ${snapshot.dealbreaker.floorPoints}% da faturação nos 3 maiores clientes.`
               : ''}
           </p>
         )}
@@ -203,8 +203,8 @@ export function ExecutivePrintView({ assessment, tasks }: { assessment: Assessme
           {assessment.estimatedSpreadPenalty > 0 && snapshot.spreadPenaltyBps
             ? ` e sobre o agravamento de spread sem rácios ESG (${snapshot.spreadPenaltyBps} pontos base por ano)`
             : ''}
-          . Não são previsões nem medições desta empresa. O score (0 a 100) é a parte da base exposta considerada em
-          risco. Os honorários são fixos.
+          . Não são previsões nem medições desta empresa. O score (0 a 100) é a parte da faturação nesses clientes
+          considerada em risco. Os honorários são fixos.
         </p>
 
         <footer className="mt-4 border border-slate-400 p-3 print-avoid-break">

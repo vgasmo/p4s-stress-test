@@ -323,7 +323,7 @@ function Assumptions({ assessment }: { assessment: AssessmentDetail }) {
           São os do dia do diagnóstico: não mudam quando um entregável é concluído.
         </p>
         <dl className="grid max-w-3xl grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-[minmax(0,1fr)_auto]">
-          <Line label={`Base exposta: ${formatPercent(input.topClientsShare)} de ${formatEUR(input.annualRevenue)} nos 3 maiores clientes`}>
+          <Line label={`Faturação nos 3 maiores clientes: ${formatPercent(input.topClientsShare)} de ${formatEUR(input.annualRevenue)}`}>
             {formatEUR(snapshot.exposedClientRevenue)}
           </Line>
           {commercialGaps.map((gap) => (
@@ -344,7 +344,7 @@ function Assumptions({ assessment }: { assessment: AssessmentDetail }) {
               {formatNumberPt(weightUsed / 100, 2)}
             </Line>
           )}
-          <Line label="Faturação comercial em risco: base exposta × peso usado" strong>
+          <Line label="Carteira comercial exposta (faturação comercial em risco): faturação nos 3 maiores clientes × peso usado" strong>
             {formatEUR(assessment.commercialRevenueAtRisk)}
           </Line>
           {hasSpread && (

@@ -229,7 +229,7 @@ await expectText('KPI carteira exposta', 'kpi-commercial-risk', nb('≈ 2,8 M �
 await expectText('KPI spread', 'kpi-spread', nb('≈ +10 mil €/ano'));
 expectEq('sem múltiplo de «proteção» no ecrã', /protege|proteção \d/.test(await page.locator('main').innerText()), false);
 await page.getByText('De onde vêm os números').click();
-await page.getByText('Faturação comercial em risco: base exposta × peso usado').waitFor();
+await page.getByText('Carteira comercial exposta (faturação comercial em risco): faturação nos 3 maiores clientes × peso usado').waitFor();
 log('as contas e os pressupostos estão à vista no plano');
 await page.getByText('O que é cada requisito').click();
 expectEq('matriz: os requisitos estão explicados', /usada no setor automóvel[\s\S]*só abrange parte das empresas/.test(await page.getByTestId('requirement-glossary').innerText()), true);
