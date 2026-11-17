@@ -6,15 +6,19 @@
 // o entregável a interno, o tirou da proposta ou o eliminou, a matriz diz o mesmo que o
 // configurador. No fim mostra as contas e os pressupostos por trás de cada número.
 //
+// Quando há documentos analisados e confirmados pelo consultor, cada requisito mostra quem o
+// exige por escrito, com a frase do documento (ecrã «Documentos»).
+//
 // Em ecrãs estreitos a tabela dá lugar a uma lista: prazo e honorários ficam à vista sem
 // deslizar para o lado.
 
 import { Check, Minus, RotateCcw, X } from 'lucide-react';
-import type { ReactNode } from 'react';
-import type { AssessmentDetail, RequirementView } from '@engine/models/api.types';
+import { Fragment, type ReactNode } from 'react';
+import type { AssessmentDetail, RequirementEvidence, RequirementView } from '@engine/models/api.types';
 import type { Task, TaskPhase } from '@engine/models/domain';
 import { gapLines, type GapLine } from '@engine/services/plan-coverage';
 import { REQUIREMENTS } from '@engine/services/requirements';
+import { EvidenceList } from '@/components/documents/EvidenceList';
 import { ExecutorBadge } from '@/components/tasks/TaskBadges';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,6 +27,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useRestoreDeliverable } from '@/hooks/usePlan';
 import { errorMessage } from '@/lib/api';
+import { evidenceByRequirement } from '@/lib/documents';
 import {
   formatBasisPoints,
   formatDatePt,
@@ -44,14 +49,19 @@ interface GapMatrixProps {
   /** Tarefas atuais do plano. */
   tasks: Task[];
   staff: boolean;
+  /** Exigências confirmadas em documentos do cliente ou do banco, por requisito. */
+  evidence?: readonly RequirementEvidence[];
 }
 
-export function GapMatrix({ assessment, tasks, staff }: GapMatrixProps) {
+const NO_EVIDENCE: readonly RequirementEvidence[] = [];
+
+export function GapMatrix({ assessment, tasks, staff, evidence = NO_EVIDENCE }: GapMatrixProps) {
   const { requirements } = assessment.snapshot;
   const lines = gapLines(assessment.snapshot, tasks);
   const lineByCode = new Map(lines.map((line) => [line.requirement.code, line]));
   const resolved = lines.filter((line) => line.resolved).length;
   const restore = useRestoreDeliverable(assessment.id);
+  const evidenceFor = evidenceByRequirement(evidence);
 
   return (
     <Card>
@@ -94,6 +104,7 @@ export function GapMatrix({ assessment, tasks, staff }: GapMatrixProps) {
                         key={row.code}
                         row={row}
                         line={lineByCode.get(row.code)}
+                        evidence={evidenceFor.get(row.code) ?? NO_EVIDENCE}
                         staff={staff}
                         restoring={restore.isPending && restore.variables === row.code}
                         onRestore={() => restore.mutate(row.code)}
@@ -122,36 +133,47 @@ export function GapMatrix({ assessment, tasks, staff }: GapMatrixProps) {
                         {rows.map((row) => {
                           const line = lineByCode.get(row.code);
                           const open = line !== undefined && !line.resolved;
+                          const written = evidenceFor.get(row.code) ?? NO_EVIDENCE;
                           return (
-                            <TableRow key={row.code} className={cn(!open && 'bg-slate-50/60')} data-testid={`gap-${row.code}`}>
-                              <TableCell>
-                                <div className="flex items-center gap-2">
-                                  <StatusIcon status={row.status} resolved={line?.resolved ?? false} />
-                                  <span className={cn('font-medium', open ? 'text-slate-900' : 'text-slate-600')}>{row.label}</span>
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-xs text-slate-700">{row.requiredByLabel}</TableCell>
-                              {line ? (
-                                <GapAnswer
-                                  line={line}
-                                  staff={staff}
-                                  restoring={restore.isPending && restore.variables === row.code}
-                                  onRestore={() => restore.mutate(row.code)}
-                                />
-                              ) : (
-                                <>
-                                  <TableCell>
-                                    <span className="text-xs text-slate-600">{noGapText(row)}</span>
+                            <Fragment key={row.code}>
+                              <TableRow className={cn(!open && 'bg-slate-50/60')} data-testid={`gap-${row.code}`}>
+                                <TableCell>
+                                  <div className="flex items-center gap-2">
+                                    <StatusIcon status={row.status} resolved={line?.resolved ?? false} />
+                                    <span className={cn('font-medium', open ? 'text-slate-900' : 'text-slate-600')}>{row.label}</span>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-xs text-slate-700">{row.requiredByLabel}</TableCell>
+                                {line ? (
+                                  <GapAnswer
+                                    line={line}
+                                    staff={staff}
+                                    restoring={restore.isPending && restore.variables === row.code}
+                                    onRestore={() => restore.mutate(row.code)}
+                                  />
+                                ) : (
+                                  <>
+                                    <TableCell>
+                                      <span className="text-xs text-slate-600">{noGapText(row)}</span>
+                                    </TableCell>
+                                    <TableCell numeric className="text-xs text-slate-600">
+                                      —
+                                    </TableCell>
+                                    <TableCell numeric className="text-xs text-slate-600">
+                                      —
+                                    </TableCell>
+                                  </>
+                                )}
+                              </TableRow>
+                              {written.length > 0 && (
+                                // Sem linha de separação: a evidência pertence ao requisito de cima.
+                                <tr className={cn(!open && 'bg-slate-50/60')}>
+                                  <TableCell colSpan={5} className="pb-2.5 pl-9 pt-0">
+                                    <EvidenceList items={written} />
                                   </TableCell>
-                                  <TableCell numeric className="text-xs text-slate-600">
-                                    —
-                                  </TableCell>
-                                  <TableCell numeric className="text-xs text-slate-600">
-                                    —
-                                  </TableCell>
-                                </>
+                                </tr>
                               )}
-                            </TableRow>
+                            </Fragment>
                           );
                         })}
                       </TableBody>
@@ -216,10 +238,11 @@ function answerTerms(line: GapLine): { deadline: string | null; fees: string | n
 function GapCard({
   row,
   line,
+  evidence,
   staff,
   restoring,
   onRestore,
-}: Omit<GapAnswerProps, 'line'> & { row: RequirementView; line: GapLine | undefined }) {
+}: Omit<GapAnswerProps, 'line'> & { row: RequirementView; line: GapLine | undefined; evidence: readonly RequirementEvidence[] }) {
   const open = line !== undefined && !line.resolved;
   const terms = line ? answerTerms(line) : null;
   return (
@@ -253,6 +276,7 @@ function GapCard({
             )}
           </dl>
         )}
+        <EvidenceList items={evidence} />
       </div>
     </li>
   );

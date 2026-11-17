@@ -12,6 +12,8 @@ export function pageTitle(pathname: string, companyName?: string | null): string
         ? ['Definir palavra-passe']
         : pathname === '/utilizadores'
           ? ['Utilizadores']
-          : ['Stress Test de Qualificação'];
+          : pathname.startsWith('/documentos')
+            ? ['Documentos', ...(companyName ? [companyName] : [])]
+            : ['Stress Test de Qualificação'];
   return [...page, SITE].join(' · ');
 }

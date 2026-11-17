@@ -42,6 +42,7 @@ const NEW_MIGRATIONS = [
   '004_user_management.sql',
   '005_task_origin_and_proposal_issue.sql',
   '006_one_deliverable_per_requirement.sql',
+  '007_document_analysis.sql',
 ];
 
 const CATALOG = {

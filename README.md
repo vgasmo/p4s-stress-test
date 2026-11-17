@@ -2,24 +2,28 @@
 
 Diagnóstico de 5 minutos e configurador de proposta para PME industriais (moldes, plásticos, automóvel, metalomecânica, agroalimentar). Estima a faturação comercial em risco e o sobrecusto bancário anual por falta de EcoVadis, pegada de carbono, rácios ESG para a banca e segurança da informação, e gera um plano de ação faseado com preço e prazo fechados.
 
+A equipa P4S pode ainda carregar o que o cliente ou o banco enviaram à empresa (questionário de fornecedor, código de conduta, carta do banco). Um modelo de IA levanta as exigências feitas ao fornecedor, cada uma com a frase do documento que a sustenta, e o que o consultor confirmar passa a aparecer no plano, ao lado do requisito. Ver «Documentos e análise com IA».
+
 ## Estrutura
 
 ```text
 p4s-stress-test/
 ├── backend/                 API Express + TypeScript + PostgreSQL (MVC + serviços)
 │   ├── src/config           env (validado com zod), base de dados, JWT
-│   ├── src/controllers      auth, assessment, task, company, user, catalog
+│   ├── src/controllers      auth, assessment, task, company, user, catalog, document
 │   ├── src/models           acesso a dados, tipos de domínio, contratos de entrada e saída
-│   ├── src/services         motor de cálculo, catálogo, gerador de tarefas, regras de negócio
+│   ├── src/services         motor de cálculo, catálogo, gerador de tarefas, regras de negócio,
+│   │                        leitura de documentos, análise com IA e verificação das citações
 │   ├── src/middlewares      sessão, papéis, validação, erros, limites de pedidos
 │   ├── src/routes           /api/v1
 │   ├── src/utils            moeda, datas, NIF e CAE
-│   ├── db/migrations        001 a 006 (.sql)
+│   ├── db/migrations        001 a 007 (.sql)
 │   ├── db/seeds             administrador e fábrica de moldes de demonstração
 │   └── tests                unitários e de integração (PostgreSQL real)
 ├── frontend/                React + Vite + Tailwind + primitivas shadcn/Radix
 │   └── src/{components,hooks,lib,pages}
-├── e2e/                     percurso completo no browser (Playwright)
+├── e2e/                     percurso completo no browser (Playwright) e servidor que faz de API de IA
+├── exemplos/                documentos fictícios para experimentar a análise com IA
 ├── .devcontainer/           ambiente de teste para GitHub Codespaces
 └── .github/workflows/       testes e percurso de browser em cada push
 ```
@@ -35,6 +39,14 @@ Com o projeto num repositório do GitHub:
 1. Na página do repositório, **Code**, separador **Codespaces**, **Create codespace on main**.
 2. Esperar que a preparação termine (alguns minutos na primeira vez). O terminal mostra as contas de teste, que ficam também em `CONTAS-DE-TESTE.txt`.
 3. No separador **Ports**, abrir o endereço da porta 3000.
+
+A análise de documentos com IA vem desligada, porque precisa de uma chave da API da Anthropic. Para a ligar no codespace:
+
+```bash
+bash .devcontainer/chave-ia.sh
+```
+
+O comando pede a chave sem a mostrar, guarda-a em `backend/.env` (que não vai para o repositório) e reinicia a aplicação. Depois, no ecrã «Documentos», pode carregar os ficheiros da pasta `exemplos/`. Cada análise é uma chamada paga à API.
 
 Para mostrar a aplicação a outra pessoa, botão direito na porta 3000, **Port Visibility**, **Public**, e partilhar o endereço. Funciona enquanto o codespace estiver ligado. É um ambiente de teste, com dados de demonstração e palavras-passe geradas na hora: não é sítio para dados de clientes.
 
@@ -108,6 +120,8 @@ Sem as dependências de desenvolvimento (`npm ci --omit=dev`), a migração e o 
 | `TRUST_PROXY` | Número de proxies à frente da API. 0 no próprio computador, 1 atrás de um proxy. Com 0 atrás de um proxy, os limites de pedidos tratam todos os clientes como um só |
 | `ALLOW_INSECURE_HTTP` | `true` permite HTTP simples fora de localhost. Desligado por omissão |
 | `STATIC_DIR` | Pasta do frontend compilado, para a API o servir |
+| `ANTHROPIC_API_KEY` | Chave da API da Anthropic, para a análise de documentos com IA. Vazia, o ecrã «Documentos» diz que a análise está desligada e nenhum documento é aceite nem enviado |
+| `P4S_AI_MODEL` | Modelo usado na análise (`claude-opus-5-5` por omissão) |
 | `P4S_CONTACT_EMAIL` | Contacto mostrado a quem faz a simulação sem ter conta e no ecrã de entrada: botão «Pedir o diagnóstico completo», que abre uma mensagem já com a simulação feita. Vazio, a página diz só que o diagnóstico é feito com a equipa Plan4Sustain |
 | `P4S_LEGAL_IDENTITY` | Quem emite a proposta (denominação, NIF, morada), impresso no resumo |
 | `P4S_PROPOSAL_TERMS` | Condições impressas no resumo (IVA, pagamento, quem é o parceiro), separadas por `\|` |
@@ -139,9 +153,23 @@ npx playwright install chromium
 E2E_ADMIN_EMAIL=... E2E_ADMIN_PASSWORD=... E2E_COMPANY_PASSWORD=... npm test
 ```
 
+Para o percurso incluir a análise de documentos sem chave nem custos, a aplicação arranca ligada a um servidor local que faz de API de IA e devolve um levantamento fixo para os documentos de `exemplos/`:
+
+```bash
+node e2e/fake-ai.mjs
+```
+
+```bash
+ANTHROPIC_API_KEY=qualquer-coisa ANTHROPIC_BASE_URL=http://127.0.0.1:4010 npm start
+```
+
+e o percurso corre com `E2E_FAKE_AI=on`. Sem isso, o percurso confirma apenas que a análise aparece desligada.
+
 As palavras-passe são as usadas no seed (`SEED_ADMIN_PASSWORD` e `SEED_DEMO_PASSWORD`). `E2E_BASE_URL` indica o endereço da aplicação (por omissão `http://localhost:5173`). O percurso altera e repõe o plano da empresa de demonstração e cria uma empresa e um utilizador de teste, por isso não deve correr contra dados reais.
 
-O workflow `.github/workflows/ci.yml` corre tudo isto em cada push: tipos, testes do backend com PostgreSQL, testes do frontend, compilação com a verificação do código público, e o percurso de browser contra a aplicação compilada.
+O workflow `.github/workflows/ci.yml` corre tudo isto em cada push: tipos, testes do backend com PostgreSQL, testes do frontend, compilação com a verificação do código público, e o percurso de browser contra a aplicação compilada, com a IA simulada.
+
+Nenhum teste automático chama a API de IA verdadeira. O que os testes cobrem é tudo o que rodeia a chamada: o pedido que o SDK envia de facto (contra um servidor local), o tratamento de cada tipo de resposta e de erro, a verificação das citações, as permissões e o que chega ao plano. A qualidade do levantamento que o modelo faz num documento real só se avalia com documentos reais.
 
 ## Motor de cálculo
 
@@ -202,6 +230,35 @@ Os valores em risco são os do dia do diagnóstico. Não descem quando um entreg
 - O resumo impresso diz que os prazos são calculados para adjudicação na data de emissão e que deslizam se a adjudicação for posterior.
 - Sem entregáveis da P4S ou do parceiro, o resumo regista o diagnóstico e não leva bloco de aceitação.
 
+## Documentos e análise com IA
+
+Ferramenta interna da equipa P4S (ecrã «Documentos»). As contas das empresas não a veem.
+
+**O que faz.** O consultor carrega um documento que a empresa recebeu de um cliente, do banco ou de um auditor. O servidor lê o texto, envia-o a um modelo de IA e recebe um levantamento: quem emite, um resumo e a lista de exigências feitas ao fornecedor. Cada exigência traz o requisito do stress test a que corresponde (ou «fora dos requisitos»), o que é pedido, se é obrigatório ou recomendado, o prazo, a consequência de não cumprir e a frase do documento que a sustenta, na língua original.
+
+**O que garante que se pode confiar no resultado.**
+
+- **Citações verificadas pelo servidor.** Cada citação é procurada no texto que o servidor extraiu do documento (`quote-verifier.ts`). A comparação ignora o que muda entre o PDF e a cópia (quebras de linha, hifenização, aspas tipográficas, ligaduras, maiúsculas) e mais nada: uma palavra ou um número diferente e a citação não é encontrada. A página que aparece é a página onde o servidor a encontrou, e não a que o modelo indicou.
+- **Uma citação que não se encontra nunca chega ao plano.** Fica assinalada, não pode ser confirmada (nem pela API, nem diretamente na base de dados) e o consultor é mandado ao original.
+- **Nada chega ao cliente sem um consultor confirmar**, exigência a exigência. O consultor pode rejeitar, voltar atrás e reclassificar. Fica registado quem decidiu e quando, e o que o modelo tinha proposto.
+- **O documento é tratado como dados.** As instruções ao modelo dizem para ignorar ordens escritas dentro do documento, e a resposta tem de cumprir um esquema fixo. Mesmo que um documento conseguisse manipular o modelo, o pior resultado é uma exigência errada com uma citação verdadeira, que passa pela revisão do consultor.
+- **Nada é cortado em silêncio.** Um documento acima de 300 mil caracteres (cerca de 150 páginas cheias) é recusado com a indicação para o dividir. Uma resposta que fique incompleta dá erro, e não um levantamento pela metade.
+
+**Onde aparece.** As exigências confirmadas que correspondem a um requisito aparecem na matriz de conformidade, por baixo do requisito («Exigido por escrito por…, até…», com a citação, o ficheiro e a página), e no resumo impresso, numa secção «Exigências documentadas» com uma citação por lacuna. A conta da empresa também as vê: são documentos dos clientes e do banco dela. As confirmadas «fora dos requisitos» ficam registadas no ecrã «Documentos».
+
+**Privacidade e confidencialidade.**
+
+- O ficheiro não é guardado. O servidor lê o texto em memória e o ficheiro é descartado. Fica o nome do ficheiro, o tamanho, a impressão digital (SHA-256, para não analisar o mesmo ficheiro duas vezes), o levantamento e as frases citadas.
+- O texto do documento é enviado à API da Anthropic. Antes de cada carregamento, o consultor confirma que o pode fazer. Cabe à P4S verificar se os acordos de confidencialidade com os clientes permitem o envio a um subcontratante e que condições de tratamento de dados contratou com a Anthropic.
+- Os registos da aplicação nunca levam texto dos documentos.
+- Sem `ANTHROPIC_API_KEY`, a funcionalidade aparece desligada e nenhum documento é aceite.
+
+**Formatos.** PDF com texto, Word (`.docx`) e texto simples, até 10 MB. O formato é identificado pelo conteúdo, e não pela extensão. Não são lidos: Excel, PowerPoint, `.doc` antigo, PDF protegidos por palavra-passe e PDF digitalizados (imagem, sem texto). Cada recusa diz o que fazer.
+
+**Chamada à API.** `document-analyzer.ts` usa o SDK oficial (`@anthropic-ai/sdk`), o modelo `claude-opus-5-5`, raciocínio adaptativo com esforço alto, resposta em fluxo e saída estruturada por esquema. Se o modelo recusar o pedido por um falso positivo dos filtros de segurança (pode acontecer com questionários de cibersegurança), a API repete-o no modelo de recurso recomendado pela Anthropic, dentro da mesma chamada (`fallbacks: "default"`), e fica registado o modelo que respondeu. A análise corre em segundo plano, no máximo três em simultâneo, e cada consultor pode carregar 30 documentos por hora.
+
+A pasta `exemplos/` tem dois documentos fictícios para experimentar: um questionário de fornecedor em inglês (PDF) e uma carta de um banco em português (Word).
+
 ## Na reunião
 
 - **Valores.** Os campos em euros aceitam «5M», «6,5 M», «500k» e «500 mil». O que não se percebe fica assinalado no campo, em vez de contar como zero. «2.5» e «0.500» são recusados por serem ambíguos.
@@ -241,6 +298,11 @@ Base: `/api/v1`. Erros em `{ "error": { "code", "message", "details?" } }`. Nenh
 | `GET /companies/current/users` | sessão com empresa | Possíveis responsáveis: nome e equipa, sem emails |
 | `GET /users`, `POST /users`, `PUT /users/:id`, `POST /users/:id/password-link` | equipa P4S | Utilizadores da empresa selecionada |
 | `GET /users/team` | administrador | Equipa P4S |
+| `GET /documents` | equipa P4S, com empresa | Documentos analisados, se a IA está configurada e os limites de carregamento |
+| `POST /documents` | equipa P4S, com empresa | Corpo: os bytes do ficheiro (`application/octet-stream`), nome em `X-File-Name` (codificado como num URL). Responde `202` com a análise em curso |
+| `GET /documents/:id`, `DELETE /documents/:id` | equipa P4S, com empresa | O levantamento com as exigências. Eliminar leva as exigências confirmadas |
+| `PATCH /documents/:id/findings/:findingId` | equipa P4S, com empresa | `reviewStatus` (`confirmed`, `rejected`, `pending`) e `requirementCode` (ou `null`). Confirmar uma citação não verificada dá `409` |
+| `GET /documents/evidence` | sessão com empresa | Exigências confirmadas, com citação verificada e requisito: o que aparece no plano |
 
 ### Simulação por escalões
 
@@ -248,9 +310,10 @@ Para a tabela de preços e o modelo não ficarem públicos, quem não é da equi
 
 ## Regras de acesso
 
-- **Isolamento por empresa.** Todas as queries a `assessments` e `tasks` filtram por `company_id = $1`, e esse valor vem só da sessão. Há um teste que lê o SQL de todo o código da API e falha se aparecer uma query a essas tabelas sem o filtro.
+- **Isolamento por empresa.** Todas as queries a `assessments`, `tasks`, `document_analyses` e `document_findings` filtram por `company_id = $1`, e esse valor vem só da sessão. Há um teste que lê o SQL de todo o código da API e falha se aparecer uma query a essas tabelas sem o filtro.
 - **Papéis.** `admin` e `consultant` são a equipa P4S e escolhem a empresa em que estão a trabalhar. `company_user` fica sempre na sua empresa.
 - **Conta de uma empresa.** Acompanha o plano. Nas tarefas do diagnóstico e nas criadas pela P4S atualiza o estado e o responsável, e mais nada: âmbito, prazo, preço, executor, fase e inclusão na proposta são da P4S, seja qual for o executor do momento. Cria tarefas internas e altera as que criou. Não elimina tarefas, não grava diagnósticos e não recebe os pesos nem a tabela de preços: simula por escalões e, no seu diagnóstico, recebe o resultado, o score, o piso setorial e o agravamento de spread (o que o resumo impresso já lhe dá), sem o peso de cada requisito, sem a soma das lacunas e sem os preços e prazos de catálogo. Os preços que vê são os da sua proposta.
+- **Documentos.** Só a equipa P4S carrega documentos, vê o levantamento e decide o que é confirmado. A conta de uma empresa recebe apenas as exigências confirmadas, no plano.
 - **Gestão de utilizadores.** Administradores e consultores gerem os utilizadores da empresa que têm selecionada. Só o administrador gere a equipa P4S. Ninguém desativa a própria conta e fica sempre pelo menos um administrador que consegue entrar, mesmo com dois pedidos de desativação em simultâneo. Um convite de administrador por usar desativa-se sempre.
 
 ## Sessão, utilizadores e palavras-passe
@@ -284,4 +347,9 @@ Não há envio de email. A equipa P4S cria a conta sem palavra-passe e recebe um
 - **A conta de uma empresa não vê o peso de cada lacuna.** No bloco «De onde vêm os números» vê a base, o peso usado e o resultado. O peso de cada requisito, a soma das lacunas e os preços e prazos de catálogo ficam na equipa P4S, também na API.
 - **Eliminar um diagnóstico repõe a ficha da empresa.** Se era o mais recente e a ficha ainda tinha o setor e a faturação dele, volta ao que tinha antes. Uma ficha corrigida à mão fica como está.
 - **«Sair» não anula um link de palavra-passe por usar.** Mudar a palavra-passe e desativar a conta anulam-no.
-- O ambiente de teste foi corrido em contentores, com as imagens que o Codespaces usa (`mcr.microsoft.com/devcontainers/typescript-node:22` e `postgres:16`), a partir de um clone limpo: preparação, arranque e o percurso completo no browser. Os dois jobs do CI foram corridos da mesma forma, passo a passo, com as variáveis de cada job. Não foram corridos na infraestrutura do GitHub: o encaminhamento de portas do Codespaces e os runners do Actions ficam por confirmar no primeiro uso.
+- O ambiente de teste foi corrido em contentores, com as imagens que o Codespaces usa (`mcr.microsoft.com/devcontainers/typescript-node:22` e `postgres:16`), a partir de um clone limpo: preparação, arranque e o percurso completo no browser. Os dois jobs do CI correm no GitHub Actions em cada push.
+- **A análise com IA é um protótipo e não foi avaliada com documentos reais.** A parte que rodeia o modelo está testada. Falta medir, com questionários reais de clientes, quantas exigências o modelo deixa de fora e quantas classifica mal. A verificação das citações apanha o que o modelo inventa, mas não apanha o que ele não viu: o consultor continua a ter de ler o documento.
+- **A classificação é só nos cinco requisitos do stress test.** O que o cliente pede fora deles (código de conduta, ISO 14001, REACH, minerais de conflito) fica registado como «fora dos requisitos» e não entra na matriz nem gera tarefas. Uma exigência confirmada também não altera o score nem cria tarefas sozinha: é evidência ao lado do requisito.
+- **Sem Excel nem OCR.** Muitos questionários de fornecedor chegam em Excel ou digitalizados. Por agora têm de ser exportados para PDF com texto.
+- **A análise em curso vive na memória do servidor.** Se o servidor reiniciar a meio, a análise é dada como interrompida ao fim de 30 minutos e o documento tem de ser carregado outra vez. Com mais de uma instância da API, o limite de três análises em simultâneo conta por instância.
+- **O texto dos documentos sai do servidor para a Anthropic.** Para clientes cujo acordo de confidencialidade não o permita, a alternativa é não usar a funcionalidade com esses documentos, ou passar a chamada para um serviço com tratamento de dados na UE contratado pela P4S.

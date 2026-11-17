@@ -60,3 +60,15 @@ export const simulateLimiter = rateLimit({
   limit: 120,
   message: tooMany('Demasiadas simulações seguidas. Aguarde um minuto.'),
 });
+
+/**
+ * Carregamento de documentos para análise com IA: cada um custa uma chamada a um serviço pago.
+ * Conta por utilizador (a rota já tem sessão), para um consultor não gastar a quota dos outros.
+ */
+export const documentUploadLimiter = rateLimit({
+  ...base,
+  windowMs: 60 * 60_000,
+  limit: 30,
+  keyGenerator: (req) => req.user?.userId ?? req.ip ?? '',
+  message: tooMany('Demasiados documentos carregados na última hora. Aguarde e tente de novo.'),
+});

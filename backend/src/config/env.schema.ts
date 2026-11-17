@@ -77,6 +77,19 @@ const envSchema = z
           .map((line) => line.trim())
           .filter((line) => line.length > 0),
       ),
+    /**
+     * Chave da API da Anthropic, para a análise de documentos com IA (só equipa P4S). Vazia:
+     * a funcionalidade aparece como não configurada e nenhum documento sai do servidor.
+     */
+    ANTHROPIC_API_KEY: z
+      .string()
+      .optional()
+      .transform((value) => value?.trim() || undefined),
+    /** Modelo usado na análise de documentos. */
+    P4S_AI_MODEL: z
+      .string()
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._:@/-]{2,99}$/, 'P4S_AI_MODEL não parece um identificador de modelo.')
+      .default('claude-opus-5-5'),
     /** Pasta do frontend compilado (frontend/dist). Vazio: a API não serve ficheiros. */
     STATIC_DIR: z
       .string()

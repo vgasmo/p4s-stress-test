@@ -7,6 +7,14 @@ describe('título do separador', () => {
     expect(pageTitle('/entrar')).toBe('Entrar · Plan4Sustain');
     expect(pageTitle('/definir-palavra-passe')).toBe('Definir palavra-passe · Plan4Sustain');
     expect(pageTitle('/utilizadores')).toBe('Utilizadores · Plan4Sustain');
+    expect(pageTitle('/documentos')).toBe('Documentos · Plan4Sustain');
+  });
+
+  it('os documentos levam o nome da empresa, com ou sem documento aberto', () => {
+    expect(pageTitle('/documentos', 'Moldes Exemplo, Lda')).toBe('Documentos · Moldes Exemplo, Lda · Plan4Sustain');
+    expect(pageTitle('/documentos/1d3ed713-b01c-4bc1-af10-9273711ed825', 'Moldes Exemplo, Lda')).toBe(
+      'Documentos · Moldes Exemplo, Lda · Plan4Sustain',
+    );
   });
 
   it('o plano leva o nome da empresa, com ou sem diagnóstico no endereço', () => {
@@ -21,7 +29,7 @@ describe('título do separador', () => {
     expect(pageTitle('/plano', null)).toBe('Plano de ação · Plan4Sustain');
   });
 
-  it('o nome da empresa só aparece no plano', () => {
+  it('o nome da empresa só aparece no plano e nos documentos', () => {
     expect(pageTitle('/', 'Moldes Exemplo, Lda')).toBe('Stress Test de Qualificação · Plan4Sustain');
     expect(pageTitle('/utilizadores', 'Moldes Exemplo, Lda')).toBe('Utilizadores · Plan4Sustain');
   });

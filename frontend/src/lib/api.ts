@@ -6,12 +6,18 @@ import type {
   AuthSession,
   CreatedAssessment,
   CreatedUser,
+  DocumentAnalysisDetail,
+  DocumentAnalysisSummary,
+  DocumentFinding,
+  DocumentListResponse,
+  FindingReviewStatus,
   ManagedUser,
   MeResponse,
   PasswordLink,
   PasswordLinkInfo,
   PublicInfo,
   PublicSimulation,
+  RequirementEvidence,
 } from '@engine/models/api.types';
 import type { Company, Task, UserRole } from '@engine/models/domain';
 import type {
@@ -73,7 +79,12 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Erro inesperado.';
 }
 
-type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';
+type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+
+/** Um ficheiro enviado tal como está no corpo do pedido (e não em JSON). */
+class FileBody {
+  constructor(readonly file: Blob, readonly fileName: string) {}
+}
 
 async function send(
   method: Method,
@@ -88,10 +99,15 @@ async function send(
       signal,
       headers: {
         Accept: 'application/json',
-        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        // O nome do ficheiro vai codificado: os cabeçalhos HTTP não levam acentos.
+        ...(body instanceof FileBody
+          ? { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(body.fileName) }
+          : body !== undefined
+            ? { 'Content-Type': 'application/json' }
+            : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: body instanceof FileBody ? body.file : body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch (cause) {
     // Um pedido cancelado (resposta que já não interessa) não é um erro de rede.
@@ -228,4 +244,19 @@ export const api = {
   updateUser: (id: string, patch: { fullName?: string; isActive?: boolean }) =>
     request<ManagedUser>('PUT', `/users/${seg(id)}`, patch),
   createPasswordLink: (id: string) => request<PasswordLink>('POST', `/users/${seg(id)}/password-link`),
+
+  /** Documentos analisados com IA para a empresa selecionada (equipa P4S). */
+  listDocuments: () => request<DocumentListResponse>('GET', '/documents'),
+  getDocument: (id: string) => request<DocumentAnalysisDetail>('GET', `/documents/${seg(id)}`),
+  /** Envia o ficheiro para análise. A resposta chega logo, com a análise em curso. */
+  uploadDocument: (file: File) => request<DocumentAnalysisSummary>('POST', '/documents', new FileBody(file, file.name)),
+  deleteDocument: (id: string) => request<void>('DELETE', `/documents/${seg(id)}`),
+  /** Decisão do consultor sobre uma exigência: confirmar, rejeitar, repor ou reclassificar. */
+  reviewFinding: (
+    analysisId: string,
+    findingId: string,
+    patch: { reviewStatus?: FindingReviewStatus; requirementCode?: RequirementCode | null },
+  ) => request<DocumentFinding>('PATCH', `/documents/${seg(analysisId)}/findings/${seg(findingId)}`, patch),
+  /** Exigências confirmadas, por requisito: a evidência que aparece no plano. */
+  listEvidence: () => request<RequirementEvidence[]>('GET', '/documents/evidence'),
 };

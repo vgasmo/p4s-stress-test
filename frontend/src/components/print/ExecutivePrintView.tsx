@@ -2,12 +2,13 @@
 // (botão «Exportar Resumo Executivo» → window.print → Guardar como PDF).
 
 import { createPortal } from 'react-dom';
-import type { AssessmentDetail } from '@engine/models/api.types';
+import type { AssessmentDetail, RequirementEvidence } from '@engine/models/api.types';
 import type { Task, TaskPhase } from '@engine/models/domain';
 import { gapLines, type GapLine } from '@engine/services/plan-coverage';
 import { countsTowardsProposal, summarizeRemediation } from '@engine/services/remediation-summary';
 import { FOOTER_SIGNATURE, Wordmark } from '@/components/layout/AppShell';
 import { usePublicInfo } from '@/hooks/usePublicInfo';
+import { clipQuote, deadlineShort, evidenceByRequirement, evidenceSource } from '@/lib/documents';
 import {
   EXECUTOR_SHORT_LABELS,
   formatApproxEUR,
@@ -25,13 +26,28 @@ import {
 const PHASES: TaskPhase[] = ['phase_1_urgent', 'phase_2_structural'];
 /** Até este número de linhas, o âmbito de cada entregável cabe na página única. */
 const MAX_ROWS_WITH_SCOPE = 6;
+/** Citação mais longa do que isto é cortada no resumo impresso (com «…»): o texto inteiro está no plano online. */
+const MAX_PRINTED_QUOTE = 230;
 
-export function ExecutivePrintView({ assessment, tasks }: { assessment: AssessmentDetail; tasks: Task[] }) {
+interface ExecutivePrintViewProps {
+  assessment: AssessmentDetail;
+  tasks: Task[];
+  /** Exigências confirmadas em documentos do cliente ou do banco. */
+  evidence?: readonly RequirementEvidence[];
+}
+
+export function ExecutivePrintView({ assessment, tasks, evidence = [] }: ExecutivePrintViewProps) {
   const { company, snapshot } = assessment;
   const summary = summarizeRemediation(tasks, assessment.commercialRevenueAtRisk);
   const included = tasks.filter((task) => task.includedInProposal);
   // Cada lacuna com o que o plano lhe responde hoje, para o resumo dizer o mesmo que o configurador.
   const gaps = gapLines(snapshot, tasks);
+  // Uma citação por lacuna (a de prazo mais próximo), para o resumo continuar numa página.
+  const evidenceFor = evidenceByRequirement(evidence);
+  const written = gaps.flatMap((gap) => {
+    const items = evidenceFor.get(gap.requirement.code) ?? [];
+    return items[0] ? [{ label: gap.requirement.label, item: items[0], more: items.length - 1 }] : [];
+  });
   const hasProposal = tasks.some(countsTowardsProposal);
   const showScope = included.length <= MAX_ROWS_WITH_SCOPE;
   // Identificação de quem emite e condições da proposta: texto da P4S, configurado no servidor.
@@ -133,6 +149,26 @@ export function ExecutivePrintView({ assessment, tasks }: { assessment: Assessme
                 ))}
               </tbody>
             </table>
+          )}
+          {written.length > 0 && (
+            <div className="mt-2" data-testid="print-evidence">
+              <h3 className="text-[9px] font-semibold uppercase tracking-wide text-slate-700">Exigências documentadas</h3>
+              <ul className="mt-0.5 space-y-1">
+                {written.map(({ label, item, more }) => {
+                  const deadline = deadlineShort(item);
+                  return (
+                    <li key={item.findingId} className="border-l-2 border-slate-400 pl-2 text-[9px] leading-snug text-slate-800">
+                      <span className="font-semibold">{label}.</span> <span className="italic">«{clipQuote(item.quote, MAX_PRINTED_QUOTE)}»</span>{' '}
+                      <span className="text-slate-700">
+                        ({evidenceSource(item)}
+                        {deadline ? `; prazo ${deadline}` : ''}
+                        {more > 0 ? `; e mais ${more} no plano online` : ''})
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
           )}
         </section>
 

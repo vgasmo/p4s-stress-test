@@ -1,6 +1,7 @@
 # Corre em cada push e pull request: tipos, testes unitários e de integração (com PostgreSQL),
 # compilação com verificação de que o catálogo privado não vai no código público, e o
-# percurso completo no browser contra a aplicação compilada.
+# percurso completo no browser contra a aplicação compilada. Nenhum passo chama a API de IA
+# verdadeira: a análise de documentos é testada com respostas simuladas.
 name: CI
 
 on:
@@ -110,10 +111,15 @@ jobs:
         working-directory: backend
         env:
           NODE_ENV: production
+      # A análise de documentos fala com um servidor local que faz de API de IA (e2e/fake-ai.mjs):
+      # o percurso corre inteiro sem chave nem chamadas reais. A chave aqui não é um segredo.
       - name: Arrancar a aplicação
         env:
           NODE_ENV: production
+          ANTHROPIC_API_KEY: chave-sem-valor-para-o-percurso
+          ANTHROPIC_BASE_URL: http://127.0.0.1:4010
         run: |
+          nohup node ../e2e/fake-ai.mjs > ../fake-ai.log 2>&1 &
           nohup npm start > ../app.log 2>&1 &
           for attempt in $(seq 1 30); do
             curl -fsS http://localhost:3000/health > /dev/null && exit 0
@@ -133,6 +139,7 @@ jobs:
           E2E_ADMIN_EMAIL: admin@p4s.test
           E2E_ADMIN_PASSWORD: ${{ env.SEED_ADMIN_PASSWORD }}
           E2E_COMPANY_PASSWORD: ${{ env.SEED_DEMO_PASSWORD }}
+          E2E_FAKE_AI: 'on'
       - name: Registo da aplicação e capturas, se falhar
         if: failure()
         uses: actions/upload-artifact@v4
@@ -140,4 +147,5 @@ jobs:
           name: percurso-browser
           path: |
             app.log
+            fake-ai.log
             e2e/capturas

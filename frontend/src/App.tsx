@@ -5,6 +5,7 @@ import { AppShell } from '@/components/layout/AppShell';
 import { ErrorBoundary } from '@/components/layout/ErrorBoundary';
 import { useSession } from '@/lib/session';
 import { ActionPlanPage } from '@/pages/ActionPlanPage';
+import { DocumentsPage } from '@/pages/DocumentsPage';
 import { LoginPage } from '@/pages/LoginPage';
 import { SetPasswordPage } from '@/pages/SetPasswordPage';
 import { StressTestPage } from '@/pages/StressTestPage';
@@ -61,6 +62,14 @@ export function App() {
           element={
             <RequireSession>
               <UsersPage />
+            </RequireSession>
+          }
+        />
+        <Route
+          path="/documentos/:analysisId?"
+          element={
+            <RequireSession>
+              <DocumentsPage />
             </RequireSession>
           }
         />

@@ -5,9 +5,11 @@
 // Precisa da app a correr e da base de dados com o seed de demonstração (SEED_DEMO=true).
 // Uso (ver README):
 //   E2E_ADMIN_EMAIL=… E2E_ADMIN_PASSWORD=… E2E_COMPANY_PASSWORD=… node full-flow.mjs [pasta-de-capturas]
-// Opcionais: E2E_BASE_URL (http://localhost:5173), E2E_COMPANY_EMAIL, E2E_SCALE (1).
+// Opcionais: E2E_BASE_URL (http://localhost:5173), E2E_COMPANY_EMAIL, E2E_SCALE (1),
+// E2E_FAKE_AI=on (a aplicação arrancou ligada a fake-ai.mjs: corre também a análise de documentos).
 import { createRequire } from 'node:module';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 const { chromium } = createRequire(import.meta.url)('playwright');
 
 const required = (name) => {
@@ -22,6 +24,10 @@ const ADMIN_EMAIL = required('E2E_ADMIN_EMAIL');
 const ADMIN_PASSWORD = required('E2E_ADMIN_PASSWORD');
 const COMPANY_EMAIL = process.env.E2E_COMPANY_EMAIL ?? 'gestao@moldes-exemplo.test';
 const COMPANY_PASSWORD = required('E2E_COMPANY_PASSWORD');
+
+/** A aplicação está ligada ao servidor que faz de API de IA (fake-ai.mjs): corre o percurso dos documentos. */
+const FAKE_AI = process.env.E2E_FAKE_AI === 'on';
+const EXAMPLE_QUESTIONNAIRE = fileURLToPath(new URL('../exemplos/questionario-fornecedor-exemplo.pdf', import.meta.url));
 
 const OUT = process.argv[2] ?? 'capturas';
 const SCALE = Number(process.env.E2E_SCALE ?? 1);
@@ -560,6 +566,76 @@ log('conta de teste desativada');
 await page.goto(planUrl);
 await page.getByTestId('kpi-total').waitFor();
 
+// ── 10c. Documentos: levantamento com IA, citações verificadas e evidência no plano ──
+// Com E2E_FAKE_AI=on a aplicação está ligada ao servidor fake-ai.mjs (não há chamadas reais).
+await page.getByRole('link', { name: 'Documentos' }).click();
+await page.getByRole('heading', { name: 'Documentos', exact: true }).waitFor();
+if (!FAKE_AI) {
+  await page.getByTestId('ai-not-configured').waitFor();
+  expectEq('documentos sem chave de IA: não se pode carregar', await page.getByRole('button', { name: 'Escolher ficheiro' }).isDisabled(), true);
+  log('documentos: sem ANTHROPIC_API_KEY a análise aparece desligada (percurso com IA simulada não corrido)');
+} else {
+  // Execuções anteriores contra a mesma base de dados: o mesmo ficheiro não se analisa duas vezes.
+  const staffAuth = { Authorization: `Bearer ${(await storedSession()).accessToken}` };
+  for (const analysis of (await (await page.request.get(`${BASE}/api/v1/documents`, { headers: staffAuth })).json()).analyses) {
+    await page.request.delete(`${BASE}/api/v1/documents/${analysis.id}`, { headers: staffAuth });
+  }
+  await page.reload();
+  await page.getByText('Comece pelo questionário do cliente').waitFor();
+  expectEq('documentos: sem confirmar que pode enviar, não carrega', await page.getByRole('button', { name: 'Escolher ficheiro' }).isDisabled(), true);
+  await page.getByLabel(/Confirmo que posso enviar/).check();
+  await page.getByTestId('document-file-input').setInputFiles(EXAMPLE_QUESTIONNAIRE);
+  await page.getByText('A IA está a ler o documento').waitFor();
+  log('documentos: o carregamento responde logo e a análise fica em curso');
+  await expectText('documentos: levantamento pronto', 'finding-counts', '6 exigências · 6 por rever', 20_000);
+  await page.waitForURL(/\/documentos\/[0-9a-f-]{36}$/);
+  const findings = page.getByTestId('finding');
+  expectEq('documentos: citações encontradas no documento', await page.locator('[data-testid="finding"][data-verified="true"]').count(), 5);
+  // A IA (simulada) indicou a página 1; a citação está na página 2, e é isso que o servidor diz.
+  expectEq('documentos: a página vem do servidor, não da IA', (await findings.nth(1).innerText()).includes('Citação encontrada no documento, na página 2.'), true);
+  const invented = findings.nth(5);
+  expectEq('documentos: a citação inventada é assinalada', (await invented.innerText()).includes('não foi encontrada no texto do documento'), true);
+  expectEq('documentos: a citação inventada não se pode confirmar', await invented.getByRole('button', { name: 'Confirmar' }).isDisabled(), true);
+  await page.getByTestId('unverified-warning').waitFor();
+  // Confirmar a EcoVadis e o TISAX, rejeitar o código de conduta e a exigência inventada.
+  for (const index of [0, 3]) {
+    await findings.nth(index).getByRole('button', { name: 'Confirmar' }).click();
+    await findings.nth(index).getByText('Confirmada', { exact: true }).waitFor();
+  }
+  for (const index of [4, 5]) {
+    await findings.nth(index).getByRole('button', { name: 'Rejeitar' }).click();
+    await findings.nth(index).getByText('Rejeitada', { exact: true }).waitFor();
+  }
+  await expectText('documentos: contagens depois da revisão', 'finding-counts', '6 exigências · 2 confirmadas · 2 por rever · 2 rejeitadas');
+  // Reclassificar: o âmbito 3 passa para «fora dos requisitos» e volta.
+  const scope3 = findings.nth(2).getByLabel('Requisito do stress test');
+  await scope3.selectOption('other');
+  await findings.nth(2).getByText('Reclassificada pelo consultor.').waitFor();
+  await scope3.selectOption('carbon_scope_3');
+  await settle();
+  expectEq('documentos: reclassificação reposta', await scope3.inputValue(), 'carbon_scope_3');
+  await page.screenshot({ path: `${OUT}/13-documentos.png`, fullPage: true });
+
+  // O que foi confirmado aparece no plano, ao lado do requisito, com a citação.
+  await page.goto(planUrl);
+  await page.getByTestId('kpi-total').waitFor();
+  const tisaxEvidence = page.locator('[data-testid="evidence-information_security"]:visible');
+  await tisaxEvidence.waitFor();
+  expectEq('plano: evidência do TISAX com quem pede e o prazo', (await tisaxEvidence.locator('summary').innerText()).startsWith('Exigido por escrito por Nordwerk Automotive Systems GmbH, até 01/01/2027'), true);
+  await tisaxEvidence.locator('summary').click();
+  expectEq('plano: a citação vem com a página', /«must hold a valid TISAX label at Assessment Level 2[\s\S]*questionario-fornecedor-exemplo\.pdf, p\. 2/.test(await tisaxEvidence.innerText()), true);
+  expectEq('plano: o que ficou por rever não aparece', await page.locator('[data-testid="evidence-carbon_scope_3"]').count(), 0);
+  await page.screenshot({ path: `${OUT}/14-plano-com-evidencia.png`, fullPage: true });
+  await page.emulateMedia({ media: 'print' });
+  const printedEvidence = await page.getByTestId('print-evidence').innerText();
+  expectEq('resumo: exigência documentada com citação e fonte', printedEvidence.includes('«must hold a valid TISAX label at Assessment Level 2') && printedEvidence.includes('p. 2; prazo 01/01/2027'), true);
+  const pdfWithEvidence = await page.pdf({ format: 'A4', printBackground: true, preferCSSPageSize: true });
+  expectEq('páginas do PDF com evidência', (pdfWithEvidence.toString('latin1').match(/\/Type\s*\/Page[^s]/g) ?? []).length, 1);
+  await page.emulateMedia({ media: 'screen' });
+}
+await page.goto(planUrl);
+await page.getByTestId('kpi-total').waitFor();
+
 // ── 11. Utilizador da empresa: termos da P4S bloqueados ─────────────────────────────
 await logout();
 await page.goto(BASE + '/entrar?next=/plano');
@@ -574,6 +650,15 @@ expectEq('empresa: sem seletor de empresas', await page.getByLabel('Empresa clie
 expectEq('empresa: sem «Novo diagnóstico»', await page.getByRole('link', { name: 'Novo diagnóstico' }).count(), 0);
 expectEq('empresa: não elimina diagnósticos', await page.getByRole('button', { name: 'Eliminar este diagnóstico' }).count(), 0);
 expectEq('empresa: não edita os dados da empresa', await page.getByRole('button', { name: 'Editar dados da empresa' }).count(), 0);
+// A análise de documentos é uma ferramenta da equipa P4S. A empresa vê só o que foi confirmado, no plano.
+expectEq('empresa: sem ecrã de documentos', await page.getByRole('link', { name: 'Documentos' }).count(), 0);
+const companyToken = (await storedSession()).accessToken;
+expectEq('empresa: a API não lhe mostra os documentos', await apiStatus('/documents', companyToken), 403);
+expectEq('empresa: a API mostra-lhe a evidência confirmada', await apiStatus('/documents/evidence', companyToken), 200);
+if (FAKE_AI) {
+  await page.locator('[data-testid="evidence-information_security"]:visible').waitFor();
+  log('empresa: vê no plano a exigência confirmada pelo consultor');
+}
 // As contas mostram à empresa o resultado e o peso usado, mas não o peso de cada lacuna, que é do catálogo.
 await page.getByText('De onde vêm os números').click();
 const companyAssumptions = await page.locator('details', { hasText: 'De onde vêm os números' }).innerText();

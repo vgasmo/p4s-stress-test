@@ -14,6 +14,7 @@ import { Select } from '@/components/ui/form';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState, ErrorBanner } from '@/components/ui/states';
 import { useAssessment, useAssessments, useDeleteAssessment, useReissueProposal } from '@/hooks/useAssessment';
+import { useEvidence } from '@/hooks/useDocuments';
 import { usePendingChanges } from '@/hooks/usePendingChanges';
 import { useTasks } from '@/hooks/useTasks';
 import { ApiError, errorMessage } from '@/lib/api';
@@ -123,6 +124,8 @@ function ActionPlan({ assessmentId, staff }: { assessmentId: string; staff: bool
   const assessment = useAssessment(assessmentId);
   const tasks = useTasks(assessmentId);
   const history = useAssessments();
+  // Exigências confirmadas em documentos do cliente. Se não carregarem, o plano abre sem elas.
+  const evidence = useEvidence();
 
   if (assessment.isPending) return <PlanSkeleton />;
 
@@ -180,9 +183,9 @@ function ActionPlan({ assessmentId, staff }: { assessmentId: string; staff: bool
       <ProposalValidity detail={detail} staff={staff} />
       <ExecutiveScoreboard assessment={detail} tasks={currentTasks} />
       <PlanProgress tasks={currentTasks} today={todayInLisbon()} />
-      <GapMatrix assessment={detail} tasks={currentTasks} staff={staff} />
+      <GapMatrix assessment={detail} tasks={currentTasks} staff={staff} evidence={evidence.data} />
       <TaskManagementBoard assessment={detail} tasksQuery={tasks} />
-      <ExecutivePrintView assessment={detail} tasks={currentTasks} />
+      <ExecutivePrintView assessment={detail} tasks={currentTasks} evidence={evidence.data} />
     </div>
   );
 }

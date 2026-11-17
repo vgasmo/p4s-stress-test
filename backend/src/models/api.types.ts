@@ -298,3 +298,102 @@ export interface AssessmentListEntry {
   completedAt: string | null;
   createdAt: string;
 }
+
+// ── Análise de documentos com IA (equipa P4S) ───────────────────────────────────────
+
+export type DocumentAnalysisStatus = 'processing' | 'done' | 'failed';
+export type DocumentFileKind = 'pdf' | 'docx' | 'txt';
+export type FindingReviewStatus = 'pending' | 'confirmed' | 'rejected';
+/** mandatory: o documento impõe. recommended: recomenda ou valoriza. unclear: não se percebe. */
+export type FindingObligation = 'mandatory' | 'recommended' | 'unclear';
+
+/** Exigência que a IA encontrou num documento, com a frase do documento que a sustenta. */
+export interface DocumentFinding {
+  id: string;
+  position: number;
+  /** Requisito do stress test a que corresponde. Null: fora dos cinco requisitos. */
+  requirementCode: RequirementCode | null;
+  /** O que a IA propôs (difere de requirementCode quando o consultor reclassificou). */
+  suggestedRequirementCode: RequirementCode | null;
+  topic: string;
+  request: string;
+  obligation: FindingObligation;
+  /** Data concreta escrita no documento (AAAA-MM-DD). */
+  deadline: string | null;
+  /** O prazo como está escrito no documento. */
+  deadlineText: string | null;
+  consequence: string | null;
+  /** Excerto literal do documento, na língua original. */
+  quote: string;
+  /** O servidor encontrou a citação no texto do documento. Sem isto não pode ser confirmada. */
+  quoteVerified: boolean;
+  /** Página onde o servidor a encontrou (só PDF). */
+  quotePage: number | null;
+  reviewStatus: FindingReviewStatus;
+  reviewedByName: string | null;
+  reviewedAt: string | null;
+}
+
+export interface DocumentFindingCounts {
+  total: number;
+  pending: number;
+  confirmed: number;
+  rejected: number;
+  /** Citações que o servidor não encontrou no documento. */
+  unverified: number;
+}
+
+/** Um documento analisado. O ficheiro em si não é guardado: fica o nome, o tamanho e o levantamento. */
+export interface DocumentAnalysisSummary {
+  id: string;
+  fileName: string;
+  fileKind: DocumentFileKind;
+  fileSize: number;
+  pageCount: number | null;
+  status: DocumentAnalysisStatus;
+  failureCode: string | null;
+  failureMessage: string | null;
+  issuer: string | null;
+  documentType: string | null;
+  documentLanguage: string | null;
+  documentDate: string | null;
+  summary: string | null;
+  /** Modelo de IA que respondeu. */
+  model: string | null;
+  uploadedByName: string | null;
+  createdAt: string;
+  completedAt: string | null;
+  findingCounts: DocumentFindingCounts;
+}
+
+export interface DocumentAnalysisDetail extends DocumentAnalysisSummary {
+  findings: DocumentFinding[];
+}
+
+export interface DocumentListResponse {
+  /** configured false: falta a chave da API no servidor e nada é enviado para fora. */
+  ai: { configured: boolean; model: string | null };
+  limits: { maxBytes: number; acceptedExtensions: string[] };
+  analyses: DocumentAnalysisSummary[];
+}
+
+/**
+ * Evidência de um requisito: uma exigência confirmada por um consultor, com a citação que o
+ * servidor encontrou no documento. É o que aparece na matriz do plano e no resumo impresso.
+ */
+export interface RequirementEvidence {
+  findingId: string;
+  analysisId: string;
+  requirementCode: RequirementCode;
+  topic: string;
+  request: string;
+  obligation: FindingObligation;
+  deadline: string | null;
+  deadlineText: string | null;
+  consequence: string | null;
+  quote: string;
+  quotePage: number | null;
+  fileName: string;
+  issuer: string | null;
+  documentDate: string | null;
+}

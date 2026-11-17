@@ -49,6 +49,21 @@ const sectorProfile = z.enum(SECTOR_PROFILES);
 
 export const idParamsSchema = z.object({ id });
 
+/** Exigência de um documento analisado: /documents/:id/findings/:findingId */
+export const findingParamsSchema = z.object({ id, findingId: id });
+
+const requirementCode = z.enum(['ecovadis', 'carbon_scope_1_2', 'carbon_scope_3', 'banking_esg', 'information_security']);
+
+/** Decisão do consultor sobre uma exigência extraída: confirmar, rejeitar, repor ou reclassificar. */
+export const reviewFindingSchema = z
+  .strictObject({
+    reviewStatus: z.enum(['pending', 'confirmed', 'rejected']).optional(),
+    /** null: a exigência não corresponde a nenhum dos requisitos do stress test. */
+    requirementCode: requirementCode.nullable().optional(),
+  })
+  .refine((value) => value.reviewStatus !== undefined || value.requirementCode !== undefined, 'Indique o que quer alterar.');
+export type ReviewFindingInput = z.infer<typeof reviewFindingSchema>;
+
 /** Lacuna de um diagnóstico: /assessments/:id/deliverables/:code */
 export const deliverableParamsSchema = z.object({
   id,

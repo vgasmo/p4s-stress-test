@@ -63,6 +63,11 @@ export function AppShell({ children }: { children: ReactNode }) {
               </NavLink>
             )}
             {isStaffSession(session) && (
+              <NavLink to="/documentos" className={navClass}>
+                Documentos
+              </NavLink>
+            )}
+            {isStaffSession(session) && (
               <NavLink to="/utilizadores" className={navClass}>
                 Utilizadores
               </NavLink>

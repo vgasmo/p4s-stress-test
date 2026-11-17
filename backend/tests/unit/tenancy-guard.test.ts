@@ -54,3 +54,35 @@ describe('isolamento multi-tenant no SQL', () => {
     expect(taskModel).toMatch(/const INSERT_COLUMNS = \[\s*'company_id',/);
   });
 });
+
+// A mesma lei para os documentos analisados: são de uma empresa, e contêm citações dos seus clientes.
+describe('isolamento multi-tenant no SQL dos documentos', () => {
+  const DOCUMENT_TABLE = /\b(?:FROM|JOIN|UPDATE|INTO)\s+(?:document_analyses|document_findings)\b/i;
+  const statements = sourceFiles(ROOT).flatMap((file) => {
+    const source = readFileSync(file, 'utf8');
+    const literals = [...source.matchAll(/`([^`]*)`|'([^'\n]*)'|"([^"\n]*)"/g)].map((match) => match[1] ?? match[2] ?? match[3] ?? '');
+    return literals
+      .filter((sql) => DOCUMENT_TABLE.test(sql) && /\b(SELECT|UPDATE|DELETE|INSERT)\b/.test(sql))
+      .map((sql) => ({ file: path.relative(ROOT, file), sql }));
+  });
+
+  it('só o model dos documentos lhes toca', () => {
+    expect(statements.length).toBeGreaterThanOrEqual(10);
+    expect(new Set(statements.map((s) => s.file))).toEqual(new Set(['models/document.model.ts']));
+  });
+
+  it('todas as leituras, alterações e remoções filtram por company_id = $1, sem OR', () => {
+    for (const { file, sql } of statements.filter((s) => !/\bINSERT\b/.test(s.sql))) {
+      expect(sql, `${file}: ${sql}`).toMatch(/company_id = \$1/);
+      expect(sql, `${file}: ${sql}`).not.toMatch(/\bOR\b/i);
+    }
+  });
+
+  it('as inserções gravam a empresa do contexto como primeiro valor', () => {
+    const inserts = statements.filter((s) => /\bINSERT\b/.test(s.sql));
+    expect(inserts).toHaveLength(2);
+    for (const { file, sql } of inserts) {
+      expect(sql, `${file}: ${sql}`).toMatch(/INSERT INTO document_(?:analyses|findings) \(company_id\b[^)]*\)\s+VALUES \(\$1,/);
+    }
+  });
+});
