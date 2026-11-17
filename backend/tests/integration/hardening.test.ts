@@ -1,5 +1,8 @@
 // Sessão, limites de tentativas, pedidos mal formados, cabeçalhos e validade da proposta.
 
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -520,8 +523,51 @@ describe('lacunas e entregáveis do plano', () => {
 });
 
 describe('aplicação servida no mesmo processo', () => {
+  let staticDir: string;
+  let served: ReturnType<typeof createApp>;
+
+  beforeAll(async () => {
+    staticDir = await mkdtemp(path.join(tmpdir(), 'p4s-static-'));
+    await mkdir(path.join(staticDir, 'assets'));
+    await writeFile(path.join(staticDir, 'index.html'), '<!doctype html><div id="root"></div>');
+    await writeFile(path.join(staticDir, 'assets', 'app.js'), 'console.log("app")');
+    served = createApp({ staticDir });
+  });
+
+  afterAll(async () => {
+    await rm(staticDir, { recursive: true, force: true });
+  });
+
   it('o estado de saúde reflete a base de dados', async () => {
     await request(app).get('/health').expect(200, { status: 'ok' });
+  });
+
+  it.each(['/', '/plano', '/plano/8d6e7177-8706-4389-aded-5b5cb5fd9142', '/entrar?next=/plano', '/plano/..%2Ftasks', '/utilizadores/a.b'])(
+    'o ecrã %s recebe a aplicação',
+    async (url) => {
+      const response = await request(served).get(url).expect(200);
+      expect(response.headers['content-type']).toMatch(/text\/html/);
+      expect(response.text).toContain('<div id="root">');
+    },
+  );
+
+  it('HEAD a um ecrã responde como GET, sem corpo', async () => {
+    const response = await request(served).head('/plano').expect(200);
+    expect(response.headers['content-type']).toMatch(/text\/html/);
+  });
+
+  it('serve os ficheiros que existem e responde 404 aos que não existem', async () => {
+    const script = await request(served).get('/assets/app.js').expect(200);
+    expect(script.headers['content-type']).toMatch(/javascript/);
+    const missing = await request(served).get('/assets/nao-existe.js').expect(404);
+    expect(missing.body.error.code).toBe('NOT_FOUND');
+    await request(served).get('/favicon.ico').expect(404);
+  });
+
+  it('a API e os outros métodos não recebem a página da aplicação', async () => {
+    const api = await request(served).get('/api/v1/nada').expect(404);
+    expect(api.body.error.code).toBe('NOT_FOUND');
+    await request(served).post('/plano').expect(404);
   });
 });
 

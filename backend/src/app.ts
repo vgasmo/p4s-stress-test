@@ -29,10 +29,16 @@ function proxyMisconfigurationWarning(): RequestHandler {
 export interface AppOptions {
   /** Por omissão vem de ALLOW_INSECURE_HTTP. */
   allowInsecureHttp?: boolean;
+  /** Por omissão vem de STATIC_DIR. */
+  staticDir?: string;
 }
+
+/** Pedido de um ficheiro (script, estilo, imagem, tipo de letra), e não de um ecrã da aplicação. */
+const STATIC_FILE = /\.(?:js|mjs|css|map|json|txt|xml|png|jpe?g|gif|svg|ico|webp|woff2?|ttf|webmanifest)$/i;
 
 export function createApp(options: AppOptions = {}): Express {
   const allowInsecureHttp = options.allowInsecureHttp ?? env.ALLOW_INSECURE_HTTP;
+  const configuredStaticDir = options.staticDir ?? env.STATIC_DIR;
   const app = express();
 
   app.disable('x-powered-by');
@@ -71,14 +77,15 @@ export function createApp(options: AppOptions = {}): Express {
   app.use('/api/v1', apiRouter());
 
   // Opcional: servir o frontend compilado no mesmo processo (um só porto em reunião).
-  if (env.STATIC_DIR) {
-    const staticDir = path.resolve(env.STATIC_DIR);
+  if (configuredStaticDir) {
+    const staticDir = path.resolve(configuredStaticDir);
     app.use(express.static(staticDir, { index: false, maxAge: '1h' }));
     app.use((req, res, next) => {
       // As rotas da app (/, /plano/…) são resolvidas no browser; a API responde 404 em JSON.
       const pageRequest = req.method === 'GET' || req.method === 'HEAD';
-      // Um ficheiro que não existe (/assets/x.js) é um 404, não a página da aplicação.
-      if (!pageRequest || req.path.startsWith('/api/') || path.extname(req.path) !== '') return next();
+      // Um ficheiro que não existe (/assets/x.js) é um 404, não a página da aplicação. Os outros
+      // caminhos são ecrãs, mesmo com pontos pelo meio: é a aplicação que decide o que mostrar.
+      if (!pageRequest || req.path.startsWith('/api/') || STATIC_FILE.test(req.path)) return next();
       res.set('Cache-Control', 'no-cache').sendFile(path.join(staticDir, 'index.html'));
     });
   }
