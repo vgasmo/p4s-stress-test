@@ -150,6 +150,7 @@ Base: `/api/v1`. Erros em `{ "error": { "code", "message", "details?" } }`.
 - Não há gestão de utilizadores nem recuperação de palavra-passe. Os utilizadores criam-se pelo seed ou em SQL.
 - Os refresh tokens não têm lista de revogação. Desativar um utilizador tem efeito na renovação seguinte, no máximo 15 minutos depois.
 - A sessão fica no `localStorage` do browser, para sobreviver a uma recarga durante a reunião.
+- As palavras-passe usam `bcryptjs` (bcrypt em JavaScript puro), para não depender de compilação nativa na instalação.
 - O resumo executivo é gerado no browser («Guardar como PDF» na janela de impressão). Não há geração de PDF no servidor.
 - O catálogo de requisitos, com pesos e preços, vai no código do frontend e na rota pública de simulação. Quem abrir a página consegue lê-lo.
 - `npm audit` está limpo nas dependências de produção. Nas de desenvolvimento resta um aviso do `picomatch` (usado pelo Vite, pelo Vitest e pelo Tailwind), que à data não tem versão corrigida publicada.
