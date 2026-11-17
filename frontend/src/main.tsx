@@ -22,6 +22,11 @@ const queryClient = new QueryClient({
       retry: (failureCount, error) => !(error instanceof ApiError && error.status >= 400 && error.status < 500) && failureCount < 1,
       refetchOnWindowFocus: false,
     },
+    mutations: {
+      // Sem rede, uma alteração é enviada na mesma e falha logo com «Sem ligação»: o ecrã desfaz-a
+      // e avisa. Por omissão ficava em espera, sem aviso, até a rede voltar.
+      networkMode: 'always',
+    },
   },
 });
 

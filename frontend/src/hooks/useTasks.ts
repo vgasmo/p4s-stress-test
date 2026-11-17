@@ -80,6 +80,22 @@ function dropListReads({ queryClient, key, tracker }: PlanContext): void {
   void queryClient.cancelQueries({ queryKey: key, exact: true });
 }
 
+// Leituras de confirmação em curso. Até chegarem, o ecrã pode ainda não ser o que está gravado:
+// contam como alterações por confirmar (usePendingChanges).
+let confirming = 0;
+const confirmingListeners = new Set<() => void>();
+function setConfirming(delta: 1 | -1): void {
+  confirming += delta;
+  for (const listener of confirmingListeners) listener();
+}
+export const savedTaskReads = {
+  subscribe(listener: () => void): () => void {
+    confirmingListeners.add(listener);
+    return () => confirmingListeners.delete(listener);
+  },
+  inFlight: (): number => confirming,
+};
+
 /**
  * Depois de uma falha não se sabe se o pedido chegou a ser aplicado. Com os pedidos todos
  * respondidos, a lista é lida outra vez para o ecrã ficar com o que está mesmo gravado.
@@ -88,13 +104,15 @@ function dropListReads({ queryClient, key, tracker }: PlanContext): void {
 async function readSavedTasks({ queryClient, key, assessmentId, tracker }: PlanContext): Promise<void> {
   if (!tracker.wantsRead) return;
   const revision = tracker.revision;
-  let tasks: Task[];
+  setConfirming(1);
   try {
-    tasks = await api.listTasks(assessmentId);
+    const tasks = await api.listTasks(assessmentId);
+    if (tracker.acceptRead(revision, tasks)) queryClient.setQueryData<Task[]>(key, tasks);
   } catch {
-    return;
+    // Sem resposta: o que está no ecrã fica como está.
+  } finally {
+    setConfirming(-1);
   }
-  if (tracker.acceptRead(revision, tasks)) queryClient.setQueryData<Task[]>(key, tasks);
 }
 
 interface UpdateVariables {
