@@ -75,13 +75,17 @@ function useDebounced<T>(value: T, delayMs: number): T {
  */
 export function usePublicSimulation(input: StressTestInput, enabled: boolean) {
   const debounced = useDebounced(input, 250);
-  return useQuery({
+  const query = useQuery({
     queryKey: ['public-simulation', debounced],
     queryFn: ({ signal }) => api.simulatePublic(debounced, signal),
     enabled,
     placeholderData: keepPreviousData,
     staleTime: 60_000,
   });
+  // Durante a espera, e enquanto a resposta não chega, o que está no ecrã é o resultado das
+  // respostas anteriores: não se pode mostrar nem enviar como se fosse o das atuais.
+  const outdated = JSON.stringify(input) !== JSON.stringify(debounced) || query.isPlaceholderData;
+  return { ...query, outdated };
 }
 
 export const assessmentKey = (companyId: string | null | undefined, id: string) => ['assessment', companyId, id] as const;

@@ -243,7 +243,7 @@ export function AssessmentWizard() {
 
   // Visitante sem conta: o passo seguinte é pedir o diagnóstico completo à equipa, por email,
   // já com o que simulou. Só existe se quem publicou tiver indicado o endereço de contacto.
-  const simulatedRisk = publicSimulation.isPlaceholderData ? null : publicSimulation.data?.commercialRisk;
+  const simulatedRisk = publicSimulation.outdated ? null : publicSimulation.data?.commercialRisk;
   const requestHref =
     mode === 'anonymous' && contact
       ? diagnosisRequestMailto(
@@ -398,7 +398,7 @@ export function AssessmentWizard() {
               <CardTitle>2 · Banca</CardTitle>
               <CardDescription>
                 Risco financeiro, separado da faturação. Sem rácios ESG, o refinanciamento agrava o spread
-                {spreadBps ? ` em ${spreadBps} pontos base por ano` : ''}.
+                {spreadBps ? ` em ${formatBasisPoints(spreadBps)} ao ano` : ''}.
               </CardDescription>
             </div>
           </CardHeader>
@@ -500,7 +500,7 @@ export function AssessmentWizard() {
             : {
                 kind: 'public',
                 simulation: publicSimulation.data,
-                updating: publicSimulation.isFetching || publicSimulation.isPlaceholderData,
+                updating: publicSimulation.isFetching || publicSimulation.outdated,
                 error: publicSimulation.isError ? errorMessage(publicSimulation.error) : null,
                 onRetry: () => void publicSimulation.refetch(),
               }
@@ -773,11 +773,12 @@ function CompanyBlock({
               <Input
                 id="company-nif"
                 inputMode="numeric"
-                maxLength={9}
                 className="font-mono tabular-nums"
                 value={state.companyNif}
                 aria-invalid={showErrors && !nifValid ? true : undefined}
-                onChange={(event) => update({ companyNif: event.target.value.replace(/\D/g, '') })}
+                // Sem maxLength: um NIF colado de uma fatura («518 742 300», «PT518742300») era
+                // cortado antes de se tirarem os espaços e o prefixo.
+                onChange={(event) => update({ companyNif: event.target.value.replace(/\D/g, '').slice(0, 9) })}
               />
             </div>
             {showErrors && (!nameValid || !nifValid) && (

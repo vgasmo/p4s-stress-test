@@ -1,5 +1,5 @@
 import { History } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ErrorBanner } from '@/components/ui/states';
 import { errorMessage } from '@/lib/api';
@@ -25,6 +25,9 @@ interface PreviousDiagnosisOfferProps {
 export function PreviousDiagnosisOffer({ record, current, touched, onApply, onUseRecord }: PreviousDiagnosisOfferProps) {
   const { latest, answers } = usePreviousDiagnosis();
   const [applied, setApplied] = useState<{ when: string; answers: PreviousAnswers } | null>(null);
+  // Os botões desta oferta desaparecem ao serem usados: o foco passa para o texto que os substitui.
+  const appliedRef = useRef<HTMLDivElement>(null);
+  const focusApplied = () => requestAnimationFrame(() => appliedRef.current?.focus());
 
   if (applied) {
     // Só enquanto o setor e a faturação aplicados ainda estiverem no formulário.
@@ -32,7 +35,13 @@ export function PreviousDiagnosisOffer({ record, current, touched, onApply, onUs
     const sector = differs.sector && current.sectorProfile === applied.answers.sectorProfile;
     const revenue = differs.revenue && current.annualRevenue === applied.answers.annualRevenue;
     return (
-      <div role="status" className="mt-3 space-y-2 border-t border-slate-200 pt-3 text-xs text-slate-700" data-testid="previous-diagnosis-applied">
+      <div
+        ref={appliedRef}
+        tabIndex={-1}
+        role="status"
+        className="mt-3 space-y-2 rounded-sm border-t border-slate-200 pt-3 text-xs text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2"
+        data-testid="previous-diagnosis-applied"
+      >
         <p>
           <span className="font-medium text-slate-900">Respostas do diagnóstico de {applied.when} aplicadas.</span> Mude o que
           for diferente e guarde como diagnóstico novo.
@@ -56,12 +65,13 @@ export function PreviousDiagnosisOffer({ record, current, touched, onApply, onUs
             <Button
               size="sm"
               variant="outline"
-              onClick={() =>
+              onClick={() => {
                 onUseRecord({
                   ...(sector ? { sectorProfile: record.sectorProfile } : {}),
                   ...(revenue ? { annualRevenue: record.annualRevenue } : {}),
-                })
-              }
+                });
+                focusApplied();
+              }}
             >
               Usar os dados da ficha
             </Button>
@@ -78,6 +88,7 @@ export function PreviousDiagnosisOffer({ record, current, touched, onApply, onUs
       onSuccess: (read) => {
         onApply(read);
         setApplied({ when, answers: read });
+        focusApplied();
       },
     });
 

@@ -315,7 +315,7 @@ function fullPreview(
             {summary.totalInvestment === 0
               ? 'nada a contratar'
               : summary.totalCostShareOfRisk !== null
-                ? `${formatShareOfRisk(summary.totalCostShareOfRisk)} da faturação em risco`
+                ? `${formatShareOfRisk(summary.totalCostShareOfRisk, summary.totalInvestment > 0)} da faturação em risco`
                 : 'honorários fixos'}
           </Metric>
         </Metrics>

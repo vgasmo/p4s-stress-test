@@ -177,9 +177,23 @@ await page.getByText('NIF inválido').waitFor();
 log('validação: NIF em falta bloqueia a gravação');
 await page.getByLabel('NIF').fill('503456782'); // dígito de controlo errado
 await page.getByText('NIF inválido').waitFor();
-await page.getByLabel('NIF').fill('503456780');
+// Um NIF colado de uma fatura, com prefixo e espaços, fica com os 9 algarismos.
+await page.getByLabel('NIF').fill('PT503 456 780');
+expectEq('NIF colado com «PT» e espaços', await page.getByLabel('NIF').inputValue(), '503456780');
 await page.getByRole('radio', { name: 'Embalagem agroalimentar' }).click();
-await page.getByRole('button', { name: '2M €' }).first().click();
+// Um valor que não se percebe («7.2» pode ser 7,2 ou 7.200) não é gravado como outra coisa.
+const posts = [];
+const countPosts = (request) => request.method() === 'POST' && request.url().endsWith('/api/v1/assessments') && posts.push(request.url());
+page.on('request', countPosts);
+await page.getByLabel('Faturação anual').fill('7.2');
+await page.getByRole('button', { name: /Guardar Diagnóstico/ }).click();
+await page.getByText('Corrija o valor assinalado antes de guardar.').waitFor();
+expectEq('valor ambíguo: não grava', posts.length, 0);
+page.off('request', countPosts);
+// Escrito por extenso, como se diz numa reunião.
+await page.getByLabel('Faturação anual').fill('2M');
+await page.getByLabel('Faturação anual').blur();
+expectEq('«2M» fica como 2.000.000 €', (await page.getByLabel('Faturação anual').inputValue()).replace(/\s/g, ''), '2.000.000');
 await page.getByRole('switch', { name: /âmbitos 1 e 2/ }).click();
 await page.getByRole('switch', { name: /Segurança da informação/ }).click();
 // 2M × 60% = 1,2M; EcoVadis 45 + âmbito 3 20 = 65 (piso agro 65) → 780.000 €
