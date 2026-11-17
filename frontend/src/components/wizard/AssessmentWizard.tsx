@@ -1,15 +1,8 @@
-import { ArrowRight, Building2, ClipboardList, LogIn } from 'lucide-react';
+import { ArrowRight, Building2, ClipboardList, LogIn, RotateCcw } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { SECTOR_PROFILES, type SectorProfile } from '@engine/models/domain';
-import {
-  REQUIREMENTS,
-  describeSources,
-  forSector,
-  requirementStatus,
-  type AnswerField,
-  type StressTestInput,
-} from '@engine/services/requirements';
+import { SECTOR_PROFILES } from '@engine/models/domain';
+import { REQUIREMENTS, describeSources, forSector, requirementStatus } from '@engine/services/requirements';
 import { isValidNif } from '@engine/utils/validation';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -20,7 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Slider } from '@/components/ui/slider';
 import { ErrorBanner } from '@/components/ui/states';
 import { Switch } from '@/components/ui/switch';
-import { useMe } from '@/hooks/useAuth';
+import { useCompanies, useMe } from '@/hooks/useAuth';
 import { useCatalog, useCreateAssessment, usePublicSimulation, useStressTestPreview } from '@/hooks/useAssessment';
 import { errorMessage, type CreateAssessmentPayload } from '@/lib/api';
 import {
@@ -31,112 +24,101 @@ import {
   formatWeight,
 } from '@/lib/formatters';
 import { isStaffSession, useSession } from '@/lib/session';
-import { cn, readStorage, writeStorage } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import type { PlanNavigationState } from '@/pages/ActionPlanPage';
 import { LiveImpactPreview } from './LiveImpactPreview';
+import {
+  DEFAULT_STATE,
+  applyToSessionCompany,
+  clearWizardDrafts,
+  freshDraft,
+  loadDraft,
+  loadSetAside,
+  newCompanyDraft,
+  reconcileDraft,
+  resumeAsNewCompany,
+  saveDraft,
+  saveSetAside,
+  toStressTestInput,
+  type DraftContext,
+  type WizardState,
+} from './wizard-draft';
 
 /** anonymous: visitante. company: conta de uma empresa (só simula). staff: equipa P4S (grava). */
 type WizardMode = 'anonymous' | 'company' | 'staff';
 
-export interface WizardState extends Record<AnswerField, boolean> {
-  companyName: string;
-  companyNif: string;
-  sectorProfile: SectorProfile;
-  annualRevenue: number;
-  topClientsShare: number;
-  hasRefinancing: boolean;
-  creditLineToRefinance: number;
-  /** Empresa a que este rascunho pertence (null: simulação sem empresa). */
-  prefilledFor: string | null;
-  /** O utilizador já mexeu em algum controlo. */
-  touched: boolean;
-}
-
-const DRAFT_KEY = 'p4s.wizard-draft';
-
-const DEFAULT_STATE: WizardState = {
-  companyName: '',
-  companyNif: '',
-  sectorProfile: 'general_industrial',
-  annualRevenue: 5_000_000,
-  topClientsShare: 60,
-  hasRefinancing: false,
-  creditLineToRefinance: 2_000_000,
-  ecovadis: false,
-  carbonFootprintScope12: false,
-  carbonFootprintScope3: false,
-  bankingEsgMetrics: false,
-  tisaxOrNis2: false,
-  prefilledFor: null,
-  touched: false,
-};
-
 const REVENUE_PRESETS = [2_000_000, 5_000_000, 10_000_000, 25_000_000];
 const CREDIT_PRESETS = [1_000_000, 2_500_000, 5_000_000];
 
-export function toStressTestInput(state: WizardState): StressTestInput {
-  return {
-    sectorProfile: state.sectorProfile,
-    annualRevenue: state.annualRevenue,
-    topClientsShare: state.topClientsShare,
-    creditLineToRefinance: state.hasRefinancing ? state.creditLineToRefinance : 0,
-    ecovadis: state.ecovadis,
-    carbonFootprintScope12: state.carbonFootprintScope12,
-    carbonFootprintScope3: state.carbonFootprintScope3,
-    bankingEsgMetrics: state.bankingEsgMetrics,
-    tisaxOrNis2: state.tisaxOrNis2,
-  };
-}
+/**
+ * Rascunho do wizard, guardado no separador e acertado com a sessão: ver wizard-draft.ts.
+ * ctx fica undefined enquanto a sessão carrega, para não decidir nada com dados a meio.
+ */
+function useWizardDraft(ctx: DraftContext | undefined) {
+  const [state, setState] = useState<WizardState>(loadDraft);
+  const [setAside, setSetAside] = useState<WizardState | null>(loadSetAside);
+  useEffect(() => saveDraft(state), [state]);
+  useEffect(() => saveSetAside(setAside), [setAside]);
 
-function useWizardDraft() {
-  const [state, setState] = useState<WizardState>(() => ({
-    ...DEFAULT_STATE,
-    ...(readStorage<Partial<WizardState>>('session', DRAFT_KEY) ?? {}),
-  }));
-  useEffect(() => writeStorage('session', DRAFT_KEY, state), [state]);
-  /** Alteração feita pelo utilizador. */
-  const update = (patch: Partial<WizardState>) => setState((current) => ({ ...current, ...patch, touched: true }));
-  const reset = () => {
-    writeStorage('session', DRAFT_KEY, null);
-    setState(DEFAULT_STATE);
+  // Mudou a pessoa ou a empresa selecionada: o rascunho é acertado antes de o ecrã ser
+  // desenhado, para nunca mostrar as respostas de um cliente sob o nome de outro.
+  const contextKey = ctx ? `${ctx.userId ?? ''}|${ctx.staff}|${ctx.company?.id ?? ''}` : undefined;
+  const [reconciledFor, setReconciledFor] = useState<string | undefined>(undefined);
+  if (ctx && contextKey !== reconciledFor) {
+    const next = reconcileDraft(state, ctx);
+    setReconciledFor(contextKey);
+    if (next.draft !== state) setState(next.draft);
+    if (next.setAside) setSetAside(next.setAside);
+  }
+
+  return {
+    state,
+    setAside,
+    /** Alteração feita pelo utilizador. */
+    update: (patch: Partial<WizardState>) => setState((current) => ({ ...current, ...patch, touched: true })),
+    /** Liga ou desliga o registo de uma empresa nova: em ambos os casos começa com o formulário limpo. */
+    setNewCompany: (on: boolean) => ctx && setState(on ? newCompanyDraft(ctx) : freshDraft(ctx)),
+    restart: () => ctx && setState(state.newCompany ? newCompanyDraft(ctx) : freshDraft(ctx)),
+    applySetAside: () => {
+      if (!ctx || !setAside) return;
+      setState(applyToSessionCompany(setAside, ctx));
+      setSetAside(null);
+    },
+    resumeSetAside: () => {
+      if (!ctx || !setAside) return;
+      setState(resumeAsNewCompany(setAside, ctx));
+      setSetAside(null);
+    },
+    discardSetAside: () => setSetAside(null),
+    /** Depois de gravar: nada fica no separador. */
+    clear: () => {
+      clearWizardDrafts();
+      setSetAside(null);
+      setState({ ...DEFAULT_STATE, owner: ctx?.userId ?? null });
+    },
   };
-  return { state, setState, update, reset };
 }
 
 export function AssessmentWizard() {
   const session = useSession();
   const staff = isStaffSession(session);
   const me = useMe();
+  const companies = useCompanies();
   const navigate = useNavigate();
   const createAssessment = useCreateAssessment();
-  const { state, setState, update, reset } = useWizardDraft();
-  const [newCompany, setNewCompany] = useState(false);
   const [triedSave, setTriedSave] = useState(false);
 
   const company = me.data?.company ?? null;
-  // Empresa da sessão: undefined enquanto carrega, null sem sessão ou sem empresa selecionada.
-  const sessionCompanyId = !session ? null : me.isSuccess ? (company?.id ?? null) : undefined;
-
-  // O rascunho pertence a uma empresa. Quando a empresa da sessão muda:
-  //  - simulação feita antes de entrar ou de escolher a empresa: mantém o que foi introduzido;
-  //  - troca entre empresas: começa de novo com o setor e a faturação da nova empresa;
-  //  - saída da empresa ou fim de sessão: limpa, para não mostrar dados de um cliente a outro.
-  useEffect(() => {
-    if (sessionCompanyId === undefined || sessionCompanyId === state.prefilledFor) return;
-    if (sessionCompanyId === null || !company) {
-      reset();
-    } else if (state.prefilledFor === null && state.touched) {
-      setState((current) => ({ ...current, prefilledFor: company.id }));
-    } else {
-      setState({
-        ...DEFAULT_STATE,
-        prefilledFor: company.id,
-        sectorProfile: company.sectorProfile,
-        ...(company.annualRevenue > 0 ? { annualRevenue: company.annualRevenue } : {}),
-      });
-    }
-    // Só reage à mudança de empresa; o estado é lido no momento.
-  }, [sessionCompanyId]);
+  const ctx: DraftContext | undefined =
+    session && !me.isSuccess
+      ? undefined
+      : {
+          userId: session?.user.id ?? null,
+          staff,
+          company: company ? { id: company.id, sectorProfile: company.sectorProfile, annualRevenue: company.annualRevenue } : null,
+        };
+  const draft = useWizardDraft(ctx);
+  const { state, update } = draft;
 
   const mode: WizardMode = !session ? 'anonymous' : staff ? 'staff' : 'company';
   const input = useMemo(() => toStressTestInput(state), [state]);
@@ -159,22 +141,33 @@ export function AssessmentWizard() {
     );
   }
 
-  const quickCreate = staff && (!company || newCompany);
-  const nifValid = isValidNif(state.companyNif.trim());
-  const nameValid = state.companyName.trim().length >= 2;
+  const quickCreate = staff && (!company || state.newCompany);
+  const typedNif = state.companyNif.trim();
+  const typedName = state.companyName.trim();
+  const nifValid = isValidNif(typedNif);
+  const nameValid = typedName.length >= 2;
   const canSave = staff && (!quickCreate || (nifValid && nameValid)) && state.annualRevenue > 0;
+  // Empresa já registada com o NIF que está a ser escrito: o diagnóstico vai para ela.
+  const existingByNif = quickCreate && nifValid ? companies.data?.find((entry) => entry.nif === typedNif) : undefined;
+  // Onde o diagnóstico fica gravado, dito por extenso ao lado do botão.
+  const destination = quickCreate
+    ? existingByNif
+      ? `Fica gravado em ${existingByNif.name} · NIF ${existingByNif.nif}, que já está registada.`
+      : `Fica gravado numa empresa nova: ${typedName || 'nome por indicar'} · NIF ${nifValid ? typedNif : 'por indicar'}.`
+    : company
+      ? `Fica gravado em ${company.name} · NIF ${company.nif}.`
+      : '';
 
   const save = () => {
     setTriedSave(true);
     if (!canSave) return;
     const payload: CreateAssessmentPayload = {
       ...toStressTestInput(state),
-      ...(quickCreate ? { company: { name: state.companyName.trim(), nif: state.companyNif.trim() } } : {}),
+      ...(quickCreate ? { company: { name: typedName, nif: typedNif } } : {}),
     };
-    const typedName = state.companyName.trim();
     createAssessment.mutate(payload, {
       onSuccess: (detail) => {
-        reset();
+        draft.clear();
         // O NIF já existia: o plano diz a que empresa o diagnóstico ficou associado.
         const planState: PlanNavigationState =
           detail.companyResolution === 'existing' ? { existingCompany: { typedName } } : {};
@@ -194,14 +187,24 @@ export function AssessmentWizard() {
           companyName={company?.name ?? null}
           companyNif={company?.nif ?? null}
           quickCreate={quickCreate}
+          existingName={existingByNif?.name ?? null}
           canToggleNew={staff && Boolean(company)}
-          onToggleNew={setNewCompany}
+          onToggleNew={draft.setNewCompany}
           state={state}
           update={update}
           showErrors={triedSave}
           nifValid={nifValid}
           nameValid={nameValid}
         />
+        {staff && draft.setAside && (
+          <SetAsideNotice
+            setAside={draft.setAside}
+            companyName={company?.name ?? null}
+            onApply={draft.applySetAside}
+            onResume={draft.resumeSetAside}
+            onDiscard={draft.discardSetAside}
+          />
+        )}
 
         <Card>
           <CardHeader>
@@ -378,6 +381,9 @@ export function AssessmentWizard() {
         saveArea={
           <SaveArea
             mode={mode}
+            destination={destination}
+            canRestart={state.touched}
+            onRestart={draft.restart}
             canSave={canSave}
             triedSave={triedSave}
             saving={createAssessment.isPending}
@@ -390,8 +396,59 @@ export function AssessmentWizard() {
   );
 }
 
+/** Uma simulação que saiu do ecrã quando o consultor escolheu uma empresa: decide ele o que lhe fazer. */
+function SetAsideNotice({
+  setAside,
+  companyName,
+  onApply,
+  onResume,
+  onDiscard,
+}: {
+  setAside: WizardState;
+  companyName: string | null;
+  onApply: () => void;
+  onResume: () => void;
+  onDiscard: () => void;
+}) {
+  const typedName = setAside.companyName.trim();
+  return (
+    <div role="status" className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sky-950">
+      <p className="text-sm">
+        <span className="font-medium">Tem uma simulação por guardar</span>
+        {typedName ? ` para «${typedName}»` : ', feita sem empresa selecionada'}: {SECTOR_PROFILE_LABELS[setAside.sectorProfile]},
+        faturação <span className="font-mono tabular-nums">{formatEUR(setAside.annualRevenue)}</span>.
+        {companyName ? ` Este ecrã mostra os dados da ficha de ${companyName}.` : ''}
+      </p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {companyName && (
+          <Button size="sm" variant="outline" onClick={onApply}>
+            Usar essas respostas em {companyName}
+          </Button>
+        )}
+        <Button size="sm" variant="outline" onClick={onResume}>
+          Continuar como empresa nova
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onDiscard}>
+          Descartar
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function RestartButton({ onRestart }: { onRestart: () => void }) {
+  return (
+    <Button variant="ghost" size="sm" className="w-full" onClick={onRestart}>
+      <RotateCcw aria-hidden /> Recomeçar
+    </Button>
+  );
+}
+
 function SaveArea({
   mode,
+  destination,
+  canRestart,
+  onRestart,
   canSave,
   triedSave,
   saving,
@@ -399,6 +456,10 @@ function SaveArea({
   onSave,
 }: {
   mode: WizardMode;
+  /** Onde o diagnóstico fica gravado (só para a equipa P4S). */
+  destination: string;
+  canRestart: boolean;
+  onRestart: () => void;
   canSave: boolean;
   triedSave: boolean;
   saving: boolean;
@@ -414,6 +475,7 @@ function SaveArea({
           </Link>
         </Button>
         <p className="text-2xs text-slate-600">As respostas ficam neste separador até entrar.</p>
+        {canRestart && <RestartButton onRestart={onRestart} />}
       </div>
     );
   }
@@ -429,6 +491,7 @@ function SaveArea({
           Isto é uma simulação: não altera o diagnóstico nem a proposta. Um novo diagnóstico é gravado com o seu consultor
           Plan4Sustain.
         </p>
+        {canRestart && <RestartButton onRestart={onRestart} />}
       </div>
     );
   }
@@ -440,6 +503,12 @@ function SaveArea({
         {!saving && <ArrowRight aria-hidden />}
       </Button>
       {triedSave && !canSave && <FieldError>Complete os dados da empresa e a faturação antes de guardar.</FieldError>}
+      {destination && (
+        <p className="text-2xs text-slate-700" data-testid="save-destination">
+          {destination}
+        </p>
+      )}
+      {canRestart && <RestartButton onRestart={onRestart} />}
     </div>
   );
 }
@@ -449,6 +518,7 @@ function CompanyBlock({
   companyName,
   companyNif,
   quickCreate,
+  existingName,
   canToggleNew,
   onToggleNew,
   state,
@@ -461,6 +531,8 @@ function CompanyBlock({
   companyName: string | null;
   companyNif: string | null;
   quickCreate: boolean;
+  /** Nome da empresa já registada com o NIF que está a ser escrito. */
+  existingName: string | null;
   canToggleNew: boolean;
   onToggleNew: (value: boolean) => void;
   state: WizardState;
@@ -526,9 +598,15 @@ function CompanyBlock({
                 {!nifValid ? 'NIF inválido (9 dígitos com dígito de controlo).' : 'Indique o nome da empresa.'}
               </FieldError>
             )}
-            <FieldHint className="md:col-span-2">
-              Se o NIF já existir, o diagnóstico fica associado à empresa registada, com o nome que lá está.
-            </FieldHint>
+            {existingName ? (
+              <FieldHint className="font-medium text-amber-800 md:col-span-2" data-testid="nif-already-registered">
+                NIF já registado como «{existingName}». O diagnóstico fica associado a essa empresa, com o nome que lá está.
+              </FieldHint>
+            ) : (
+              <FieldHint className="md:col-span-2">
+                Se o NIF já existir, o diagnóstico fica associado à empresa registada, com o nome que lá está.
+              </FieldHint>
+            )}
           </div>
         ) : (
           <p className="text-sm text-slate-900">

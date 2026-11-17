@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
+import { clearWizardDrafts } from '@/components/wizard/wizard-draft';
 import { api } from '@/lib/api';
 import { isStaffSession, sessionStore, useSession } from '@/lib/session';
 
@@ -19,6 +20,8 @@ export function useAuthActions() {
   /** Termina a sessão no servidor (todos os dispositivos) e limpa este browser, mesmo sem rede. */
   const logout = useCallback(async () => {
     await api.logout();
+    // As respostas de uma reunião não ficam no separador para quem o usar a seguir.
+    clearWizardDrafts();
     sessionStore.set(null);
     queryClient.clear();
   }, [queryClient]);
