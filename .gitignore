@@ -5,3 +5,4 @@ coverage/
 *.log
 *.tsbuildinfo
 e2e/capturas/
+CONTAS-DE-TESTE.txt

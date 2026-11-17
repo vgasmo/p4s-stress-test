@@ -1,0 +1,23 @@
+# Ambiente de teste: a aplicação e um PostgreSQL só para ela.
+# Segue o modelo oficial «Node.js & PostgreSQL» dos Dev Containers.
+services:
+  app:
+    image: mcr.microsoft.com/devcontainers/typescript-node:22
+    volumes:
+      - ../..:/workspaces:cached
+    command: sleep infinity
+    # Partilha a rede com a base de dados: o PostgreSQL fica em localhost:5432.
+    network_mode: service:db
+
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: p4s
+      POSTGRES_PASSWORD: p4s
+      POSTGRES_DB: p4s_dev
+
+volumes:
+  postgres-data:
