@@ -57,6 +57,13 @@ const CREDIT_PRESETS = [1_000_000, 2_500_000, 5_000_000];
 function useWizardDraft(ctx: DraftContext | undefined) {
   const [state, setState] = useState<WizardState>(loadDraft);
   const [setAside, setSetAside] = useState<WizardState | null>(loadSetAside);
+  // Conta as vezes em que as respostas foram trocadas de uma só vez (recomeçar, outra empresa,
+  // simulação que estava de parte): os campos largam o texto que tinham a meio.
+  const [revision, setRevision] = useState(0);
+  const replace = (next: WizardState) => {
+    setState(next);
+    setRevision((current) => current + 1);
+  };
   useEffect(() => saveDraft(state), [state]);
   useEffect(() => saveSetAside(setAside), [setAside]);
 
@@ -67,26 +74,27 @@ function useWizardDraft(ctx: DraftContext | undefined) {
   if (ctx && contextKey !== reconciledFor) {
     const next = reconcileDraft(state, ctx);
     setReconciledFor(contextKey);
-    if (next.draft !== state) setState(next.draft);
+    if (next.draft !== state) replace(next.draft);
     if (next.setAside) setSetAside(next.setAside);
   }
 
   return {
     state,
     setAside,
+    revision,
     /** Alteração feita pelo utilizador. */
     update: (patch: Partial<WizardState>) => setState((current) => ({ ...current, ...patch, touched: true })),
     /** Liga ou desliga o registo de uma empresa nova: em ambos os casos começa com o formulário limpo. */
-    setNewCompany: (on: boolean) => ctx && setState(on ? newCompanyDraft(ctx) : freshDraft(ctx)),
-    restart: () => ctx && setState(state.newCompany ? newCompanyDraft(ctx) : freshDraft(ctx)),
+    setNewCompany: (on: boolean) => ctx && replace(on ? newCompanyDraft(ctx) : freshDraft(ctx)),
+    restart: () => ctx && replace(state.newCompany ? newCompanyDraft(ctx) : freshDraft(ctx)),
     applySetAside: () => {
       if (!ctx || !setAside) return;
-      setState(applyToSessionCompany(setAside, ctx));
+      replace(applyToSessionCompany(setAside, ctx));
       setSetAside(null);
     },
     resumeSetAside: () => {
       if (!ctx || !setAside) return;
-      setState(resumeAsNewCompany(setAside, ctx));
+      replace(resumeAsNewCompany(setAside, ctx));
       setSetAside(null);
     },
     discardSetAside: () => setSetAside(null),
@@ -94,7 +102,7 @@ function useWizardDraft(ctx: DraftContext | undefined) {
     clear: () => {
       clearWizardDrafts();
       setSetAside(null);
-      setState({ ...DEFAULT_STATE, owner: ctx?.userId ?? null });
+      replace({ ...DEFAULT_STATE, owner: ctx?.userId ?? null });
     },
   };
 }
@@ -107,6 +115,11 @@ export function AssessmentWizard() {
   const navigate = useNavigate();
   const createAssessment = useCreateAssessment();
   const [triedSave, setTriedSave] = useState(false);
+  // Campos em euros com texto que não foi percebido: o valor em vigor é o anterior, por isso
+  // não se grava enquanto lá estiver.
+  const [unread, setUnread] = useState({ revenue: false, credit: false });
+  // Um botão rápido repõe o campo, mesmo que o valor escolhido seja o que já lá estava.
+  const [picks, setPicks] = useState({ revenue: 0, credit: 0 });
 
   const company = me.data?.company ?? null;
   const ctx: DraftContext | undefined =
@@ -146,7 +159,17 @@ export function AssessmentWizard() {
   const typedName = state.companyName.trim();
   const nifValid = isValidNif(typedNif);
   const nameValid = typedName.length >= 2;
-  const canSave = staff && (!quickCreate || (nifValid && nameValid)) && state.annualRevenue > 0;
+  // O que falta para gravar, dito junto ao botão. Uma coisa de cada vez, pela ordem do ecrã.
+  const saveBlocker = !staff
+    ? null
+    : quickCreate && !(nifValid && nameValid)
+      ? 'Complete o nome e o NIF da empresa antes de guardar.'
+      : unread.revenue || unread.credit
+        ? 'Corrija o valor assinalado antes de guardar.'
+        : state.annualRevenue <= 0
+          ? 'Indique a faturação anual antes de guardar.'
+          : null;
+  const canSave = staff && saveBlocker === null;
   // Empresa já registada com o NIF que está a ser escrito: o diagnóstico vai para ela.
   const existingByNif = quickCreate && nifValid ? companies.data?.find((entry) => entry.nif === typedNif) : undefined;
   // Onde o diagnóstico fica gravado, dito por extenso ao lado do botão.
@@ -174,6 +197,11 @@ export function AssessmentWizard() {
         navigate(`/plano/${detail.id}`, { state: planState });
       },
     });
+  };
+
+  const pickAmount = (field: 'revenue' | 'credit', patch: Partial<WizardState>) => {
+    update(patch);
+    setPicks((current) => ({ ...current, [field]: current[field] + 1 }));
   };
 
   const dealbreaker = catalog.data?.dealbreakers.find((rule) => rule.sector === state.sectorProfile);
@@ -252,8 +280,19 @@ export function AssessmentWizard() {
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="annual-revenue">Faturação anual</Label>
-                <EuroInput id="annual-revenue" value={state.annualRevenue} onValueChange={(annualRevenue) => update({ annualRevenue })} />
-                <Presets values={REVENUE_PRESETS} current={state.annualRevenue} onPick={(annualRevenue) => update({ annualRevenue })} label="Faturação" />
+                <EuroInput
+                  key={`${draft.revision}-${picks.revenue}`}
+                  id="annual-revenue"
+                  value={state.annualRevenue}
+                  onValueChange={(annualRevenue) => update({ annualRevenue })}
+                  onInvalidChange={(revenue) => setUnread((current) => ({ ...current, revenue }))}
+                />
+                <Presets
+                  values={REVENUE_PRESETS}
+                  current={state.annualRevenue}
+                  onPick={(annualRevenue) => pickAmount('revenue', { annualRevenue })}
+                  label="Faturação"
+                />
               </div>
 
               <div className="space-y-2">
@@ -302,11 +341,18 @@ export function AssessmentWizard() {
               <div className="grid grid-cols-1 gap-2 border-l-2 border-slate-200 pl-4 md:max-w-md">
                 <Label htmlFor="credit-line">Montante a refinanciar</Label>
                 <EuroInput
+                  key={`${draft.revision}-${picks.credit}`}
                   id="credit-line"
                   value={state.creditLineToRefinance}
                   onValueChange={(creditLineToRefinance) => update({ creditLineToRefinance })}
+                  onInvalidChange={(credit) => setUnread((current) => ({ ...current, credit }))}
                 />
-                <Presets values={CREDIT_PRESETS} current={state.creditLineToRefinance} onPick={(creditLineToRefinance) => update({ creditLineToRefinance })} label="Crédito" />
+                <Presets
+                  values={CREDIT_PRESETS}
+                  current={state.creditLineToRefinance}
+                  onPick={(creditLineToRefinance) => pickAmount('credit', { creditLineToRefinance })}
+                  label="Crédito"
+                />
               </div>
             )}
           </CardContent>
@@ -377,15 +423,14 @@ export function AssessmentWizard() {
         sectorProfile={state.sectorProfile}
         annualRevenue={state.annualRevenue}
         creditLineToRefinance={input.creditLineToRefinance}
-        onUseSampleRevenue={() => update({ annualRevenue: 5_000_000 })}
+        onUseSampleRevenue={() => pickAmount('revenue', { annualRevenue: 5_000_000 })}
         saveArea={
           <SaveArea
             mode={mode}
             destination={destination}
             canRestart={state.touched}
             onRestart={draft.restart}
-            canSave={canSave}
-            triedSave={triedSave}
+            blocker={triedSave ? saveBlocker : null}
             saving={createAssessment.isPending}
             error={createAssessment.isError ? errorMessage(createAssessment.error) : null}
             onSave={save}
@@ -449,8 +494,7 @@ function SaveArea({
   destination,
   canRestart,
   onRestart,
-  canSave,
-  triedSave,
+  blocker,
   saving,
   error,
   onSave,
@@ -460,8 +504,8 @@ function SaveArea({
   destination: string;
   canRestart: boolean;
   onRestart: () => void;
-  canSave: boolean;
-  triedSave: boolean;
+  /** O que falta para gravar, depois de se ter tentado. */
+  blocker: string | null;
   saving: boolean;
   error: string | null;
   onSave: () => void;
@@ -502,7 +546,7 @@ function SaveArea({
         {saving ? 'A guardar…' : 'Guardar Diagnóstico e Gerar Plano de Ação'}
         {!saving && <ArrowRight aria-hidden />}
       </Button>
-      {triedSave && !canSave && <FieldError>Complete os dados da empresa e a faturação antes de guardar.</FieldError>}
+      {blocker && <FieldError>{blocker}</FieldError>}
       {destination && (
         <p className="text-2xs text-slate-700" data-testid="save-destination">
           {destination}
