@@ -1,4 +1,4 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import type { AssessmentDetail, CreatedAssessment } from '@engine/models/api.types';
 import type { UpdateCompanyInput } from '@engine/models/schemas';
@@ -138,6 +138,32 @@ export function useReissueProposal(assessmentId: string) {
   });
 }
 
+/**
+ * Tira da cache os dados de um diagnóstico eliminado assim que nenhum ecrã os estiver a usar.
+ * Tirá-los com o plano ainda aberto fazia o ecrã voltar a pedi-los, e a resposta era um 404.
+ */
+function dropWhenUnused(queryClient: QueryClient, queryKey: QueryKey): void {
+  const cache = queryClient.getQueryCache();
+  const query = cache.find({ queryKey, exact: true });
+  if (!query) return;
+  if (query.getObserversCount() === 0) {
+    cache.remove(query);
+    return;
+  }
+  const unsubscribe = cache.subscribe((event) => {
+    if (event.query !== query) return;
+    if (event.type === 'removed') unsubscribe();
+    else if (event.type === 'observerRemoved' && query.getObserversCount() === 0) {
+      unsubscribe();
+      cache.remove(query);
+    }
+  });
+}
+
+/**
+ * Elimina um diagnóstico e as tarefas dele (equipa P4S). Quem chama sai do plano quando a
+ * eliminação termina: nessa altura a lista de diagnósticos da empresa já está atualizada.
+ */
 export function useDeleteAssessment() {
   const session = useSession();
   const queryClient = useQueryClient();
@@ -145,9 +171,10 @@ export function useDeleteAssessment() {
   return useMutation({
     mutationFn: (assessmentId: string) => api.deleteAssessment(assessmentId),
     onSuccess: async (_result, assessmentId) => {
-      queryClient.removeQueries({ queryKey: assessmentKey(companyId, assessmentId) });
-      queryClient.removeQueries({ queryKey: tasksKey(companyId, assessmentId) });
-      await queryClient.invalidateQueries({ queryKey: ['assessments', companyId] });
+      dropWhenUnused(queryClient, assessmentKey(companyId, assessmentId));
+      dropWhenUnused(queryClient, tasksKey(companyId, assessmentId));
+      // Só a lista (chave exata): o diagnóstico eliminado não se volta a pedir.
+      await queryClient.invalidateQueries({ queryKey: ['assessments', companyId], exact: true });
     },
   });
 }

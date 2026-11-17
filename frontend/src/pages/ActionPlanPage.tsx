@@ -1,5 +1,5 @@
 import { Building2, ClipboardList, FilePlus2, FileWarning, Info, Pencil, Printer, RefreshCw, SearchX, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import type { AssessmentDetail, AssessmentListEntry } from '@engine/models/api.types';
 import { CompanySheet } from '@/components/company/CompanySheet';
@@ -166,7 +166,7 @@ function ActionPlan({ assessmentId, staff }: { assessmentId: string; staff: bool
 
   return (
     <div className="space-y-4">
-      <PlanHeader detail={detail} history={history.data ?? []} staff={staff} />
+      <PlanHeader detail={detail} history={history.data ?? []} staff={staff} taskCount={currentTasks.length} />
       <ExistingCompanyNotice detail={detail} />
       <ProposalValidity detail={detail} staff={staff} />
       <ExecutiveScoreboard assessment={detail} tasks={currentTasks} />
@@ -178,101 +178,134 @@ function ActionPlan({ assessmentId, staff }: { assessmentId: string; staff: bool
   );
 }
 
-function PlanHeader({ detail, history, staff }: { detail: AssessmentDetail; history: AssessmentListEntry[]; staff: boolean }) {
+interface PlanHeaderProps {
+  detail: AssessmentDetail;
+  history: AssessmentListEntry[];
+  staff: boolean;
+  /** Tarefas que o plano tem agora (o que se perde ao eliminar o diagnóstico). */
+  taskCount: number;
+}
+
+function PlanHeader({ detail, history, staff, taskCount }: PlanHeaderProps) {
   const navigate = useNavigate();
   const [editingCompany, setEditingCompany] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const deleteButton = useRef<HTMLButtonElement>(null);
   const { company, proposal } = detail;
 
+  const cancelDelete = () => {
+    setConfirmingDelete(false);
+    // O botão volta a estar ativo depois de o ecrã atualizar: só então pode receber o foco.
+    requestAnimationFrame(() => deleteButton.current?.focus());
+  };
+
   return (
-    <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-      <div className="min-w-0">
-        <p className="text-2xs font-medium uppercase tracking-wide text-slate-600">Plano de ação</p>
-        <div className="mt-0.5 flex items-center gap-1.5">
-          <h1 className="truncate text-xl font-semibold tracking-tight text-slate-900">{company.name}</h1>
+    <div className="space-y-3">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+        <div className="min-w-0">
+          <p className="text-2xs font-medium uppercase tracking-wide text-slate-600">Plano de ação</p>
+          <div className="mt-0.5 flex items-center gap-1.5">
+            <h1 className="truncate text-xl font-semibold tracking-tight text-slate-900">{company.name}</h1>
+            {staff && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setEditingCompany(true)}
+                aria-label="Editar dados da empresa"
+                title="Editar dados da empresa"
+              >
+                <Pencil aria-hidden />
+              </Button>
+            )}
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-700">
+            <span>
+              NIF <span className="font-mono tabular-nums text-slate-900">{company.nif}</span>
+            </span>
+            {company.cae && (
+              <span>
+                CAE <span className="font-mono tabular-nums text-slate-900">{company.cae}</span>
+              </span>
+            )}
+            <Badge tone="outline">{sectorLabel(detail.sectorProfile)}</Badge>
+            <span>
+              Diagnóstico de <span className="font-mono tabular-nums text-slate-900">{formatDatePt(detail.snapshot.baseDate)}</span>
+              {detail.conductedByName ? `, por ${detail.conductedByName}` : ''}
+            </span>
+            {!proposal.expired && (
+              <span data-testid="proposal-dates">
+                Proposta válida até <span className="font-mono tabular-nums text-slate-900">{formatDatePt(proposal.validUntil)}</span>
+              </span>
+            )}
+          </div>
+          {/* Os dados de partida do cálculo, para se poder conferir o número e repetir o diagnóstico. */}
+          <p className="mt-1 text-xs text-slate-600" data-testid="plan-inputs">
+            Calculado com faturação anual de{' '}
+            <span className="font-mono tabular-nums text-slate-900">{formatEUR(detail.snapshot.input.annualRevenue)}</span>, dos quais{' '}
+            <span className="font-mono tabular-nums text-slate-900">{formatPercent(detail.snapshot.input.topClientsShare)}</span> nos 3
+            maiores clientes
+            {detail.creditLineToRefinance > 0 && (
+              <>
+                , e <span className="font-mono tabular-nums text-slate-900">{formatEUR(detail.creditLineToRefinance)}</span> de crédito a
+                refinanciar
+              </>
+            )}
+            .
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 xl:shrink-0 xl:flex-nowrap">
+          {history.length > 1 && (
+            <Select
+              aria-label="Histórico de diagnósticos"
+              containerClassName="w-64"
+              className="h-8 text-xs"
+              value={detail.id}
+              onChange={(event) => navigate(`/plano/${event.target.value}`)}
+            >
+              {history.map((entry) => (
+                <option key={entry.id} value={entry.id} disabled={!entry.openable}>
+                  {formatDateTimePt(entry.createdAt)}
+                  {entry.openable
+                    ? ` · ${formatEUR(entry.commercialRevenueAtRisk)} em risco · ${entry.taskCount} ${entry.taskCount === 1 ? 'tarefa' : 'tarefas'}${
+                        entry.conductedByName ? ` · ${entry.conductedByName}` : ''
+                      }`
+                    : ' · versão anterior, não abre'}
+                </option>
+              ))}
+            </Select>
+          )}
+          {staff && (
+            <Button asChild variant="outline" size="sm">
+              <Link to="/">
+                <FilePlus2 aria-hidden /> Novo diagnóstico
+              </Link>
+            </Button>
+          )}
+          <Button
+            size="sm"
+            onClick={() => printWithTitle(`Resumo executivo · ${company.name} · ${formatDatePt(proposal.issuedOn).replaceAll('/', '-')}`)}
+          >
+            <Printer aria-hidden /> Exportar Resumo Executivo (1 Página / PDF)
+          </Button>
           {staff && (
             <Button
+              ref={deleteButton}
               variant="ghost"
               size="icon"
-              onClick={() => setEditingCompany(true)}
-              aria-label="Editar dados da empresa"
-              title="Editar dados da empresa"
+              onClick={() => setConfirmingDelete(true)}
+              disabled={confirmingDelete}
+              aria-label="Eliminar este diagnóstico"
+              title="Eliminar este diagnóstico"
             >
-              <Pencil aria-hidden />
+              <Trash2 aria-hidden />
             </Button>
           )}
         </div>
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-700">
-          <span>
-            NIF <span className="font-mono tabular-nums text-slate-900">{company.nif}</span>
-          </span>
-          {company.cae && (
-            <span>
-              CAE <span className="font-mono tabular-nums text-slate-900">{company.cae}</span>
-            </span>
-          )}
-          <Badge tone="outline">{sectorLabel(detail.sectorProfile)}</Badge>
-          <span>
-            Diagnóstico de <span className="font-mono tabular-nums text-slate-900">{formatDatePt(detail.snapshot.baseDate)}</span>
-            {detail.conductedByName ? `, por ${detail.conductedByName}` : ''}
-          </span>
-          {!proposal.expired && (
-            <span data-testid="proposal-dates">
-              Proposta válida até <span className="font-mono tabular-nums text-slate-900">{formatDatePt(proposal.validUntil)}</span>
-            </span>
-          )}
-        </div>
-        {/* Os dados de partida do cálculo, para se poder conferir o número e repetir o diagnóstico. */}
-        <p className="mt-1 text-xs text-slate-600" data-testid="plan-inputs">
-          Calculado com faturação anual de{' '}
-          <span className="font-mono tabular-nums text-slate-900">{formatEUR(detail.snapshot.input.annualRevenue)}</span>, dos quais{' '}
-          <span className="font-mono tabular-nums text-slate-900">{formatPercent(detail.snapshot.input.topClientsShare)}</span> nos 3
-          maiores clientes
-          {detail.creditLineToRefinance > 0 && (
-            <>
-              , e <span className="font-mono tabular-nums text-slate-900">{formatEUR(detail.creditLineToRefinance)}</span> de crédito a
-              refinanciar
-            </>
-          )}
-          .
-        </p>
+        {staff && <CompanySheet open={editingCompany} onOpenChange={setEditingCompany} company={company} />}
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        {history.length > 1 && (
-          <Select
-            aria-label="Histórico de diagnósticos"
-            containerClassName="w-64"
-            className="h-8 text-xs"
-            value={detail.id}
-            onChange={(event) => navigate(`/plano/${event.target.value}`)}
-          >
-            {history.map((entry) => (
-              <option key={entry.id} value={entry.id} disabled={!entry.openable}>
-                {formatDateTimePt(entry.createdAt)}
-                {entry.openable
-                  ? ` · ${formatEUR(entry.commercialRevenueAtRisk)} em risco · ${entry.taskCount} ${entry.taskCount === 1 ? 'tarefa' : 'tarefas'}${
-                      entry.conductedByName ? ` · ${entry.conductedByName}` : ''
-                    }`
-                  : ' · versão anterior, não abre'}
-              </option>
-            ))}
-          </Select>
-        )}
-        {staff && (
-          <Button asChild variant="outline" size="sm">
-            <Link to="/">
-              <FilePlus2 aria-hidden /> Novo diagnóstico
-            </Link>
-          </Button>
-        )}
-        <Button
-          size="sm"
-          onClick={() => printWithTitle(`Resumo executivo · ${company.name} · ${formatDatePt(proposal.issuedOn).replaceAll('/', '-')}`)}
-        >
-          <Printer aria-hidden /> Exportar Resumo Executivo (1 Página / PDF)
-        </Button>
-        {staff && <DeleteAssessmentButton assessmentId={detail.id} compact />}
-      </div>
-      {staff && <CompanySheet open={editingCompany} onOpenChange={setEditingCompany} company={company} />}
+      {staff && confirmingDelete && (
+        <DeleteAssessmentConfirmation assessmentId={detail.id} taskCount={taskCount} onCancel={cancelDelete} />
+      )}
     </div>
   );
 }
@@ -333,23 +366,61 @@ function ProposalValidity({ detail, staff }: { detail: AssessmentDetail; staff: 
 }
 
 /** Eliminar um diagnóstico (de teste ou enganado) pede confirmação: leva as tarefas com ele. */
-function DeleteAssessmentButton({ assessmentId, compact = false }: { assessmentId: string; compact?: boolean }) {
+function useDeleteAndLeave(assessmentId: string) {
   const navigate = useNavigate();
   const remove = useDeleteAssessment();
+  return {
+    remove,
+    run: () => remove.mutate(assessmentId, { onSuccess: () => navigate('/plano', { replace: true }) }),
+  };
+}
+
+/** Faixa de confirmação no plano aberto: diz o que se perde antes de pedir o segundo clique. */
+function DeleteAssessmentConfirmation({
+  assessmentId,
+  taskCount,
+  onCancel,
+}: {
+  assessmentId: string;
+  taskCount: number;
+  onCancel: () => void;
+}) {
+  const { remove, run } = useDeleteAndLeave(assessmentId);
+  return (
+    <div
+      role="group"
+      aria-label="Confirmar eliminação do diagnóstico"
+      data-testid="delete-assessment-confirmation"
+      className="flex flex-col gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2.5 text-rose-950 sm:flex-row sm:items-center"
+    >
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium">Eliminar este diagnóstico?</p>
+        <p className="text-xs text-rose-900">
+          {taskCount === 0
+            ? 'O diagnóstico deixa de existir. Não se consegue recuperar.'
+            : `O diagnóstico e ${taskCount === 1 ? 'a tarefa' : `as ${taskCount} tarefas`} do plano deixam de existir. Não se consegue recuperar.`}
+        </p>
+        {remove.isError && <p className="mt-1 text-xs font-medium text-rose-800">{errorMessage(remove.error)}</p>}
+      </div>
+      <div className="flex shrink-0 flex-wrap gap-2">
+        <Button variant="destructive" size="sm" disabled={remove.isPending} onClick={run}>
+          <Trash2 aria-hidden /> {remove.isPending ? 'A eliminar…' : 'Eliminar diagnóstico e tarefas'}
+        </Button>
+        <Button variant="outline" size="sm" disabled={remove.isPending} onClick={onCancel} autoFocus>
+          Cancelar
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Num diagnóstico que não abre só há o botão: pede confirmação no próprio sítio. */
+function DeleteAssessmentButton({ assessmentId }: { assessmentId: string }) {
+  const { remove, run } = useDeleteAndLeave(assessmentId);
   const [confirming, setConfirming] = useState(false);
 
   if (!confirming) {
-    return compact ? (
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={() => setConfirming(true)}
-        aria-label="Eliminar este diagnóstico"
-        title="Eliminar este diagnóstico"
-      >
-        <Trash2 aria-hidden />
-      </Button>
-    ) : (
+    return (
       <Button variant="danger" size="sm" onClick={() => setConfirming(true)}>
         <Trash2 aria-hidden /> Eliminar este diagnóstico
       </Button>
@@ -358,12 +429,7 @@ function DeleteAssessmentButton({ assessmentId, compact = false }: { assessmentI
 
   return (
     <span className="inline-flex flex-wrap items-center gap-2" role="group" aria-label="Confirmar eliminação do diagnóstico">
-      <Button
-        variant="destructive"
-        size="sm"
-        disabled={remove.isPending}
-        onClick={() => remove.mutate(assessmentId, { onSuccess: () => navigate('/plano', { replace: true }) })}
-      >
+      <Button variant="destructive" size="sm" disabled={remove.isPending} onClick={run}>
         <Trash2 aria-hidden /> {remove.isPending ? 'A eliminar…' : 'Eliminar diagnóstico e tarefas'}
       </Button>
       <Button variant="outline" size="sm" disabled={remove.isPending} onClick={() => setConfirming(false)}>

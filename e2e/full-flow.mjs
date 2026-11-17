@@ -201,6 +201,26 @@ await page.getByRole('dialog').waitFor({ state: 'detached' });
 await page.getByRole('heading', { name: 'Embalagens Reunião E2E, Lda' }).waitFor();
 log('dados da empresa corrigidos e repostos');
 
+// ── 3d. Eliminar o diagnóstico: diz o que se perde, e só elimina ao segundo clique ───
+const createdUrl = page.url();
+const createdId = createdUrl.split('/').pop();
+await page.getByRole('button', { name: 'Eliminar este diagnóstico' }).click();
+const deleteConfirmation = page.getByTestId('delete-assessment-confirmation');
+await deleteConfirmation.waitFor();
+expectEq('eliminar: a confirmação diz o que se perde', (await deleteConfirmation.innerText()).includes('as 2 tarefas do plano deixam de existir'), true);
+await deleteConfirmation.getByRole('button', { name: 'Cancelar' }).click();
+await deleteConfirmation.waitFor({ state: 'detached' });
+await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Eliminar este diagnóstico', null, { timeout: 2000 }).then(
+  () => log('eliminar: cancelar devolve o foco ao botão'),
+  () => fail('eliminar: cancelar não devolveu o foco ao botão'),
+);
+expectEq('eliminar: cancelar não elimina', page.url(), createdUrl);
+await page.getByRole('button', { name: 'Eliminar este diagnóstico' }).click();
+await deleteConfirmation.getByRole('button', { name: 'Eliminar diagnóstico e tarefas' }).click();
+await page.waitForURL((url) => !url.pathname.endsWith(createdId));
+await settle();
+expectEq('eliminar: o diagnóstico deixa de existir', await apiStatus(`/assessments/${createdId}`, (await storedSession()).accessToken), 404);
+
 // ── 4. Empresa de demonstração: indicadores ─────────────────────────────────────────
 await page.getByLabel('Empresa cliente').selectOption(demoValue);
 await page.getByRole('heading', { name: 'Moldes Exemplo, Lda (demonstração)' }).waitFor();
@@ -494,6 +514,12 @@ await page.setViewportSize({ width: 390, height: 844 });
 const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 await page.getByTestId('kpi-total').waitFor();
 expectEq('telemóvel, plano: scroll horizontal (px)', await overflow(), 0);
+// No telemóvel a matriz é uma lista: prazo e honorários leem-se sem deslizar para o lado.
+const phoneGap = page.getByTestId('gap-card-banking_esg');
+await phoneGap.scrollIntoViewIfNeeded();
+expectEq('telemóvel, matriz: prazo e honorários à vista', /Prazo \d{2}\/\d{2}\/\d{4}[\s\S]*Honorários/.test(await phoneGap.innerText()), true);
+expectEq('telemóvel, matriz: a linha cabe no ecrã', await phoneGap.evaluate((el) => el.getBoundingClientRect().right <= window.innerWidth && el.scrollWidth <= el.clientWidth), true);
+expectEq('telemóvel, matriz: a tabela larga não aparece', await page.getByTestId('gap-banking_esg').isVisible(), false);
 await page.screenshot({ path: `${OUT}/11-telemovel-plano.png`, fullPage: true });
 await page.goto(BASE + '/');
 await page.getByTestId('preview-revenue-at-risk').waitFor();
