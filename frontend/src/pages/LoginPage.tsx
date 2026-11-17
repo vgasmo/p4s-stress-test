@@ -7,31 +7,15 @@ import { Input, Label } from '@/components/ui/form';
 import { ErrorBanner } from '@/components/ui/states';
 import { useAuthActions } from '@/hooks/useAuth';
 import { errorMessage } from '@/lib/api';
+import { safeNext } from '@/lib/safe-next';
 import { useSession } from '@/lib/session';
-
-const DEFAULT_NEXT = '/plano';
-
-/**
- * Só aceita caminhos internos: começa por uma só barra e não leva espaços, caracteres de
- * controlo nem barras invertidas. Evita redirecionamentos para fora e destinos que o
- * router recusa (e que deixavam a página em branco).
- */
-function safeNext(value: string | null): string {
-  if (!value || !/^\/(?!\/)[\x21-\x7E]*$/.test(value) || value.includes('\\')) return DEFAULT_NEXT;
-  try {
-    const url = new URL(value, window.location.origin);
-    return url.origin === window.location.origin ? `${url.pathname}${url.search}${url.hash}` : DEFAULT_NEXT;
-  } catch {
-    return DEFAULT_NEXT;
-  }
-}
 
 export function LoginPage() {
   const session = useSession();
   const { login } = useAuthActions();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const next = safeNext(params.get('next'));
+  const next = safeNext(params.get('next'), window.location.origin);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [pending, setPending] = useState(false);
