@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { pool } from '../config/database.js';
 import { env } from '../config/env.js';
-import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../config/jwt.js';
+import { nowInSeconds, signAccessToken, signRefreshToken, verifyRefreshToken } from '../config/jwt.js';
 import type { AuthSession, MeResponse } from '../models/api.types.js';
 import { companyModel } from '../models/company.model.js';
 import type { AuthUser, User } from '../models/domain.js';
@@ -33,10 +33,15 @@ export async function resolveCompanyScope(user: User, requested: string | null |
   return company.id;
 }
 
-export function issueSession(user: User, companyId: string | null): AuthSession {
+/** sessionStartedAt: momento do login. Mantém-se nas renovações, para a sessão ter um fim. */
+export function issueSession(
+  user: User,
+  companyId: string | null,
+  sessionStartedAt: number = nowInSeconds(),
+): AuthSession {
   return {
-    accessToken: signAccessToken({ userId: user.id, companyId, role: user.role }),
-    refreshToken: signRefreshToken(user.id, companyId, user.tokenVersion),
+    accessToken: signAccessToken({ userId: user.id, companyId, role: user.role }, user.tokenVersion),
+    refreshToken: signRefreshToken(user.id, companyId, user.tokenVersion, sessionStartedAt),
     tokenType: 'Bearer',
     expiresIn: env.JWT_ACCESS_TTL_SECONDS,
     user: toPublicUser(user),
@@ -54,14 +59,23 @@ export const authService = {
     return session;
   },
 
-  /** Renova a sessão (rotação do refresh) e, para a equipa P4S, permite mudar de empresa. */
+  /** Renova a sessão e, para a equipa P4S, permite mudar de empresa. */
   async refresh(input: RefreshInput): Promise<AuthSession> {
     const claims = verifyRefreshToken(input.refreshToken);
+    // Uma sessão não se renova para sempre: ao fim do prazo máximo é preciso entrar outra vez.
+    if (nowInSeconds() - claims.sessionStartedAt > env.SESSION_MAX_TTL_SECONDS) {
+      throw unauthorized('Sessão expirada. Inicie sessão novamente.');
+    }
     const user = await userModel.findById(pool, claims.userId);
-    // A versão muda quando a palavra-passe muda ou a conta é desativada: sessões antigas não se renovam.
-    if (!user || !user.isActive || claims.tv !== user.tokenVersion) throw unauthorized('Sessão inválida.');
+    // A versão muda quando a sessão é terminada, a palavra-passe muda ou a conta é desativada.
+    if (!user || !user.isActive || claims.tokenVersion !== user.tokenVersion) throw unauthorized('Sessão inválida.');
     const requested = input.companyId !== undefined ? input.companyId : claims.companyId;
-    return issueSession(user, await resolveCompanyScope(user, requested));
+    return issueSession(user, await resolveCompanyScope(user, requested), claims.sessionStartedAt);
+  },
+
+  /** Termina a sessão em todos os dispositivos: os tokens emitidos até agora deixam de valer. */
+  async logout(auth: AuthUser): Promise<void> {
+    await userModel.revokeSessions(pool, auth.userId);
   },
 
   async me(auth: AuthUser): Promise<MeResponse> {

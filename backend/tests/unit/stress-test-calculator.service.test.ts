@@ -140,7 +140,7 @@ describe('separação entre risco comercial e risco bancário', () => {
     [125, 1], // 0,50 € → 1 €
     [375, 2], // 1,50 € → 2 €
     [1_234_567.89, 4_938],
-    [MAX_MONEY_AMOUNT, 40_000_000_000],
+    [MAX_MONEY_AMOUNT, 4_000_000_000],
   ])('spread de 40 bps sobre %d € = %d €/ano', (credit, penalty) => {
     const result = calculator.calculate({
       ...FULLY_COMPLIANT,
@@ -285,7 +285,9 @@ describe('aritmética', () => {
       topClientsShare: 100,
     });
     expect(result.exposedClientRevenue).toBe(MAX_MONEY_AMOUNT);
-    expect(result.commercialRevenueAtRisk).toBe(10_000_000_000_000);
+    // Arredondado ao euro, o resultado passa o teto de entrada, mas cabe em NUMERIC(15, 2).
+    expect(result.commercialRevenueAtRisk).toBe(1_000_000_000_000);
+    expect(result.commercialRevenueAtRisk).toBeLessThan(9_999_999_999_999.99);
   });
 });
 

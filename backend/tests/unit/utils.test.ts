@@ -9,7 +9,7 @@ import {
   roundToSignificant,
 } from '../../src/utils/currency.js';
 import { addDays, daysBetween, formatDatePt, isValidIsoDate, todayInLisbon } from '../../src/utils/dates.js';
-import { isValidCae, isValidNif } from '../../src/utils/validation.js';
+import { isPlainText, isSingleLineText, isValidCae, isValidNif } from '../../src/utils/validation.js';
 
 const NBSP = ' ';
 
@@ -94,6 +94,26 @@ describe('validation', () => {
     expect(isValidNif('510000002')).toBe(true);
     expect(isValidNif('500000001')).toBe(false);
     expect(isValidNif('12345678')).toBe(false);
+  });
+
+  it('recusa NIF com um primeiro dígito que não existe', () => {
+    expect(isValidNif('000000000')).toBe(false); // dígito de controlo certo, mas nenhum NIF começa por 0
+    expect(isValidNif('400000008')).toBe(false); // idem para 4, fora do prefixo 45
+    expect(isValidNif('450000001')).toBe(true); // 45: não residentes
+    expect(isValidNif('123456789')).toBe(true);
+  });
+
+  it('textos de uma linha não levam caracteres de controlo nem quebras de linha', () => {
+    expect(isSingleLineText('Moldes Exemplo, Lda (demonstração)')).toBe(true);
+    expect(isSingleLineText('abc\u0000def')).toBe(false);
+    expect(isSingleLineText('duas\nlinhas')).toBe(false);
+    expect(isSingleLineText('com\ttabulação')).toBe(false);
+  });
+
+  it('descrições aceitam quebras de linha, mas não outros caracteres de controlo', () => {
+    expect(isPlainText('linha 1\nlinha 2\r\n\tcom recuo')).toBe(true);
+    expect(isPlainText('x\u0000y')).toBe(false);
+    expect(isPlainText('x\u001By')).toBe(false);
   });
 
   it('valida CAE de 5 dígitos', () => {

@@ -1,6 +1,8 @@
 // Tipos de domínio partilhados. Ficheiro sem dependências de Node, para poder ser
 // importado pelo frontend (motor de cálculo em tempo real).
 
+import type { RequirementCode } from '../services/requirements.js';
+
 export const USER_ROLES = ['admin', 'consultant', 'company_user'] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
@@ -31,6 +33,22 @@ export type TaskExecutor = (typeof TASK_EXECUTORS)[number];
 
 export const TASK_PHASES = ['phase_1_urgent', 'phase_2_structural'] as const;
 export type TaskPhase = (typeof TASK_PHASES)[number];
+
+/**
+ * Quem definiu a tarefa. assessment: gerada pelo diagnóstico. p4s: criada pela equipa P4S.
+ * company: criada pela própria empresa (sempre interna).
+ */
+export const TASK_ORIGINS = ['assessment', 'p4s', 'company'] as const;
+export type TaskOrigin = (typeof TASK_ORIGINS)[number];
+
+/**
+ * O que o utilizador da empresa pode alterar numa tarefa que não foi ele a criar: acompanha
+ * o trabalho, não redefine o âmbito, o prazo nem o preço.
+ */
+export const COMPANY_FOLLOW_UP_FIELDS = ['status', 'assignedUserId'] as const;
+
+/** Validade da proposta de honorários, em dias a contar da data de emissão. */
+export const PROPOSAL_VALIDITY_DAYS = 30;
 
 export const SECTOR_PROFILES = [
   'automotive_molds',
@@ -120,6 +138,8 @@ export interface Assessment {
   /** Sobrecusto financeiro anual por agravamento de spread (€/ano). */
   estimatedSpreadPenalty: number;
   rawResponses: Record<string, unknown>;
+  /** Data de emissão da proposta. A validade conta a partir daqui. */
+  proposalIssuedAt: string;
   completedAt: string | null;
   createdAt: string;
 }
@@ -140,6 +160,11 @@ export interface Task {
   /** Data ISO (YYYY-MM-DD), sem fuso horário. */
   deadline: string | null;
   assignedUserId: string | null;
+  /** Requisito do diagnóstico que deu origem à tarefa. Null nas tarefas criadas à mão. */
+  requirementCode: RequirementCode | null;
+  origin: TaskOrigin;
+  createdBy: string | null;
+  updatedBy: string | null;
   createdAt: string;
   updatedAt: string;
 }

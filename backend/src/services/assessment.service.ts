@@ -4,15 +4,19 @@ import type {
   AssessmentDetail,
   AssessmentListEntry,
   AssessmentSnapshot,
+  CompanyResolution,
   CompanySummary,
+  CreatedAssessment,
   DealbreakerSnapshot,
   FullSimulation,
+  ProposalInfo,
   RequirementSnapshot,
   SimulationResponse,
 } from '../models/api.types.js';
 import { assessmentModel } from '../models/assessment.model.js';
 import { companyModel } from '../models/company.model.js';
 import {
+  PROPOSAL_VALIDITY_DAYS,
   isStaffRole,
   type Assessment,
   type AuthUser,
@@ -22,8 +26,8 @@ import {
 } from '../models/domain.js';
 import type { CreateAssessmentInput, QuickCompanyInput, SimulateAssessmentInput } from '../models/schemas.js';
 import { taskModel, type NewTask } from '../models/task.model.js';
-import { todayInLisbon } from '../utils/dates.js';
-import { companyScopeRequired, forbidden, notFound } from '../utils/errors.js';
+import { addDays, daysBetween, todayInLisbon } from '../utils/dates.js';
+import { AppError, companyScopeRequired, forbidden, notFound } from '../utils/errors.js';
 import { CATALOG } from './catalog.private.js';
 import { toPublicSimulation } from './public-simulation.js';
 import { summarizeRemediation } from './remediation-summary.js';
@@ -87,7 +91,10 @@ function toFullSimulation(result: StressTestResult, baseDate: string): FullSimul
   };
 }
 
-const toNewTask = (draft: GeneratedTaskDraft): NewTask => ({
+const toNewTask = (draft: GeneratedTaskDraft, createdBy: string): NewTask => ({
+  requirementCode: draft.requirementCode,
+  origin: 'assessment',
+  createdBy,
   title: draft.title,
   description: draft.description,
   domain: draft.domain,
@@ -111,7 +118,43 @@ const toCompanySummary = (company: Company): CompanySummary => ({
   exportPercentage: company.exportPercentage,
 });
 
-function buildDetail(assessment: Assessment, company: Company, tasks: Task[]): AssessmentDetail {
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * Fotografia do cálculo guardada em raw_responses. Null quando não existe ou está incompleta
+ * (rascunhos e diagnósticos anteriores à fase 2): esses não se conseguem abrir.
+ */
+function readSnapshot(assessment: Assessment): AssessmentSnapshot | null {
+  if (assessment.status !== 'completed') return null;
+  const raw = assessment.rawResponses;
+  if (typeof raw.baseDate !== 'string' || !isRecord(raw.input) || !Array.isArray(raw.requirements)) return null;
+  const complete = raw.requirements.every(
+    (item) => isRecord(item) && typeof item.code === 'string' && isRecord(item.solution),
+  );
+  return complete ? (raw as unknown as AssessmentSnapshot) : null;
+}
+
+const notOpenable = () =>
+  new AppError(
+    409,
+    'ASSESSMENT_NOT_OPENABLE',
+    'Este diagnóstico foi gravado por uma versão anterior e não pode ser aberto. Faça um novo diagnóstico para esta empresa.',
+  );
+
+/** A validade conta a partir da data de emissão guardada, e não do dia em que alguém imprime. */
+function proposalInfo(assessment: Assessment, today: string = todayInLisbon()): ProposalInfo {
+  const issuedOn = todayInLisbon(new Date(assessment.proposalIssuedAt));
+  const validUntil = addDays(issuedOn, PROPOSAL_VALIDITY_DAYS);
+  return { issuedOn, validUntil, validityDays: PROPOSAL_VALIDITY_DAYS, expired: today > validUntil };
+}
+
+function buildDetail(
+  assessment: Assessment,
+  snapshot: AssessmentSnapshot,
+  company: Company,
+  tasks: Task[],
+): AssessmentDetail {
   return {
     id: assessment.id,
     status: assessment.status,
@@ -124,7 +167,8 @@ function buildDetail(assessment: Assessment, company: Company, tasks: Task[]): A
     completedAt: assessment.completedAt,
     createdAt: assessment.createdAt,
     company: toCompanySummary(company),
-    snapshot: assessment.rawResponses as unknown as AssessmentSnapshot,
+    snapshot,
+    proposal: proposalInfo(assessment),
     remediationSummary: summarizeRemediation(tasks, assessment.revenueAtRisk),
     tasks,
   };
@@ -132,19 +176,17 @@ function buildDetail(assessment: Assessment, company: Company, tasks: Task[]): A
 
 /**
  * Empresa da avaliação. Por omissão a da sessão (JWT). A equipa P4S pode indicar
- * NIF + nome para criar a empresa na hora (ou reutilizar a que já tem esse NIF).
+ * NIF + nome para criar a empresa na hora. Se o NIF já existir, usa a empresa que lá está
+ * tal como está, e a resposta diz que foi isso que aconteceu.
  */
 async function resolveCompany(
   client: pg.PoolClient,
   auth: AuthUser,
   quick: QuickCompanyInput | undefined,
   payload: CreateAssessmentInput,
-): Promise<Company> {
+): Promise<{ company: Company; resolution: CompanyResolution }> {
   if (quick) {
-    if (!isStaffRole(auth.role)) throw forbidden('Só a equipa P4S pode registar empresas.');
-    const existing = await companyModel.findByNif(client, quick.nif);
-    if (existing) return existing;
-    return companyModel.insert(client, {
+    const created = await companyModel.insertIfAbsent(client, {
       name: quick.name,
       nif: quick.nif,
       cae: quick.cae ?? '',
@@ -152,27 +194,40 @@ async function resolveCompany(
       annualRevenue: payload.annualRevenue ?? 0,
       exportPercentage: quick.exportPercentage ?? 0,
     });
+    if (created) return { company: created, resolution: 'created' };
+    const existing = await companyModel.findByNif(client, quick.nif);
+    if (!existing) throw notFound('Empresa não encontrada.');
+    return { company: existing, resolution: 'existing' };
   }
   if (!auth.companyId) throw companyScopeRequired();
   const company = await companyModel.findById(client, auth.companyId);
   if (!company) throw notFound('Empresa não encontrada.');
-  return company;
+  return { company, resolution: 'session' };
 }
+
+const assertStaff = (role: AuthUser['role'], message: string): void => {
+  if (!isStaffRole(role)) throw forbidden(message);
+};
 
 export const assessmentService = {
   /**
-   * Diagnóstico em memória, sem gravar nada. Com sessão devolve o cálculo completo.
-   * Sem sessão devolve só ordens de grandeza, sem pesos nem preços.
+   * Diagnóstico em memória, sem gravar nada. A equipa P4S recebe o cálculo completo.
+   * Os outros (sem sessão ou com conta de empresa) recebem só ordens de grandeza, sem pesos
+   * nem preços.
    */
-  simulate(input: SimulateAssessmentInput, authenticated: boolean): SimulationResponse {
+  simulate(input: SimulateAssessmentInput, fullAccess: boolean): SimulationResponse {
     const result = calculator.calculate(input);
-    return authenticated ? toFullSimulation(result, todayInLisbon()) : toPublicSimulation(input, result, CATALOG);
+    return fullAccess ? toFullSimulation(result, todayInLisbon()) : toPublicSimulation(input, result, CATALOG);
   },
 
-  /** Calcula, grava a avaliação e insere as tarefas numa única transação. */
-  async create(auth: AuthUser, payload: CreateAssessmentInput): Promise<AssessmentDetail> {
+  /**
+   * Calcula, grava a avaliação e insere as tarefas numa única transação. Só a equipa P4S:
+   * um diagnóstico gravado gera entregáveis com preço e é a base de uma proposta.
+   */
+  async create(auth: AuthUser, payload: CreateAssessmentInput): Promise<CreatedAssessment> {
+    assertStaff(auth.role, 'Só a equipa P4S grava diagnósticos. Peça um novo diagnóstico ao seu consultor.');
     return withTransaction(async (client) => {
-      const company = await resolveCompany(client, auth, payload.company, payload);
+      const { company, resolution } = await resolveCompany(client, auth, payload.company, payload);
 
       const input: StressTestInput = {
         sectorProfile: payload.sectorProfile ?? company.sectorProfile,
@@ -212,21 +267,54 @@ export const assessmentService = {
         rawResponses: snapshot as unknown as Record<string, unknown>,
       });
 
-      const drafts = generator.generate(result.gaps, baseDate).map(toNewTask);
+      const drafts = generator.generate(result.gaps, baseDate).map((draft) => toNewTask(draft, auth.userId));
       await taskModel.insertBatch(client, company.id, assessment.id, drafts);
       const tasks = await taskModel.list(client, company.id, { assessmentId: assessment.id });
 
-      return buildDetail(assessment, company, tasks);
+      return { ...buildDetail(assessment, snapshot, company, tasks), companyResolution: resolution };
     });
   },
 
   async get(ctx: TenantContext, id: string): Promise<AssessmentDetail> {
     const assessment = await assessmentModel.findById(pool, ctx.companyId, id);
     if (!assessment) throw notFound('Avaliação não encontrada.');
+    const snapshot = readSnapshot(assessment);
+    if (!snapshot) throw notOpenable();
     const company = await companyModel.findById(pool, ctx.companyId);
     if (!company) throw notFound('Empresa não encontrada.');
     const tasks = await taskModel.list(pool, ctx.companyId, { assessmentId: assessment.id });
-    return buildDetail(assessment, company, tasks);
+    return buildDetail(assessment, snapshot, company, tasks);
+  },
+
+  /**
+   * Reemite a proposta com a data de hoje. Os entregáveis da P4S e do parceiro que ainda não
+   * começaram deslizam os mesmos dias, para manterem a duração prometida.
+   */
+  async reissueProposal(ctx: TenantContext, id: string): Promise<AssessmentDetail> {
+    assertStaff(ctx.role, 'Só a equipa P4S reemite propostas.');
+    return withTransaction(async (client) => {
+      const current = await assessmentModel.findById(client, ctx.companyId, id, { forUpdate: true });
+      if (!current) throw notFound('Avaliação não encontrada.');
+      const snapshot = readSnapshot(current);
+      if (!snapshot) throw notOpenable();
+      const company = await companyModel.findById(client, ctx.companyId);
+      if (!company) throw notFound('Empresa não encontrada.');
+
+      const shift = daysBetween(todayInLisbon(new Date(current.proposalIssuedAt)), todayInLisbon());
+      const reissued = await assessmentModel.markProposalIssued(client, ctx.companyId, id);
+      if (!reissued) throw notFound('Avaliação não encontrada.');
+      if (shift > 0) await taskModel.shiftPendingDeliverables(client, ctx.companyId, id, shift);
+
+      const tasks = await taskModel.list(client, ctx.companyId, { assessmentId: id });
+      return buildDetail(reissued, snapshot, company, tasks);
+    });
+  },
+
+  /** Elimina um diagnóstico (de teste ou enganado) e as suas tarefas. */
+  async remove(ctx: TenantContext, id: string): Promise<void> {
+    assertStaff(ctx.role, 'Só a equipa P4S pode eliminar diagnósticos.');
+    const removed = await assessmentModel.remove(pool, ctx.companyId, id);
+    if (!removed) throw notFound('Avaliação não encontrada.');
   },
 
   async list(ctx: TenantContext): Promise<AssessmentListEntry[]> {
@@ -239,6 +327,8 @@ export const assessmentService = {
       commercialRevenueAtRisk: row.revenueAtRisk,
       estimatedSpreadPenalty: row.estimatedSpreadPenalty,
       taskCount: row.taskCount,
+      openable: readSnapshot(row) !== null,
+      proposal: proposalInfo(row),
       conductedByName: row.conductedByName,
       completedAt: row.completedAt,
       createdAt: row.createdAt,

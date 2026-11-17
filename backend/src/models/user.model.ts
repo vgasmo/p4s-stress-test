@@ -138,4 +138,9 @@ export const userModel = {
   async touchLogin(db: Queryable, id: string): Promise<void> {
     await db.query(`UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1`, [id]);
   },
+
+  /** Termina todas as sessões do utilizador: os tokens emitidos até agora deixam de valer. */
+  async revokeSessions(db: Queryable, id: string): Promise<void> {
+    await db.query(`UPDATE users SET token_version = token_version + 1 WHERE id = $1`, [id]);
+  },
 };

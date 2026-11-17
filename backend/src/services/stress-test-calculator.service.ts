@@ -40,7 +40,11 @@ import {
 } from './requirements.js';
 
 /** Limite de NUMERIC(15, 2). */
-export const MAX_MONEY_AMOUNT = 9_999_999_999_999.99;
+/**
+ * Teto dos valores de entrada (faturação, crédito). Fica uma ordem de grandeza abaixo do que
+ * NUMERIC(15, 2) guarda, para o resultado, que é arredondado ao euro, caber sempre na coluna.
+ */
+export const MAX_MONEY_AMOUNT = 999_999_999_999.99;
 
 export interface RequirementEvaluation {
   requirement: RequirementDefinition;

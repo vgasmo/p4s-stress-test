@@ -8,7 +8,7 @@ import type {
   TaskStatus,
 } from '../models/domain.js';
 import { addDays, isValidIsoDate } from '../utils/dates.js';
-import { describeSources, type RequirementCode, type RequirementSource } from './requirements.js';
+import type { RequirementCode, RequirementSource } from './requirements.js';
 import type { RequirementEvaluation } from './stress-test-calculator.service.js';
 
 export interface GeneratedTaskDraft {
@@ -44,7 +44,7 @@ export class TaskGeneratorService {
         requirementCode: requirement.code,
         requiredBy: requirement.requiredBy,
         title: task.title,
-        description: `${task.description}\n\nExigido por: ${describeSources(requirement.requiredBy)}.`,
+        description: task.description,
         domain: task.domain,
         priority: task.priority,
         status: 'backlog',

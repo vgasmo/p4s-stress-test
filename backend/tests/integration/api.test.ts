@@ -2,7 +2,14 @@ import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { pool } from '../../src/config/database.js';
-import type { AssessmentDetail, AuthSession, FullSimulation, PublicSimulation } from '../../src/models/api.types.js';
+import type {
+  AssessmentDetail,
+  AssignableUser,
+  AuthSession,
+  CreatedAssessment,
+  FullSimulation,
+  PublicSimulation,
+} from '../../src/models/api.types.js';
 import type { Task } from '../../src/models/domain.js';
 import {
   AUTOMOTIVE_ANSWERS,
@@ -35,8 +42,11 @@ const count = async (table: 'assessments' | 'tasks' | 'companies') =>
 async function createAssessmentAs(session: AuthSession, body: Record<string, unknown> = AUTOMOTIVE_ANSWERS) {
   const response = await request(app).post('/api/v1/assessments').set(bearer(session)).send(body);
   expect(response.status, JSON.stringify(response.body)).toBe(201);
-  return response.body as AssessmentDetail;
+  return response.body as CreatedAssessment;
 }
+
+/** Só a equipa P4S grava diagnósticos: a consultora, com a empresa A selecionada. */
+const consultantForA = () => login('consultora@p4s.test', fx.companyA.id);
 
 const taskByDomain = (detail: AssessmentDetail, domain: Task['domain']) => {
   const task = detail.tasks.find((t) => t.domain === domain);
@@ -167,8 +177,16 @@ describe('POST /api/v1/assessments/simulate', () => {
     );
   });
 
-  it('com sessão devolve o cálculo completo', async () => {
+  it('a conta de uma empresa recebe o mesmo que um visitante: escalões, sem pesos nem preços', async () => {
     const session = await login('gestor@empresa-a.test');
+    const response = await request(app).post('/api/v1/assessments/simulate').set(bearer(session)).send(AUTOMOTIVE);
+    expect(response.status).toBe(200);
+    expect(response.body.access).toBe('public');
+    expect(JSON.stringify(response.body)).not.toMatch(/weightPoints|floorPoints|estimatedCost|riskScore/);
+  });
+
+  it('a equipa P4S recebe o cálculo completo', async () => {
+    const session = await login('consultora@p4s.test');
     const response = await request(app).post('/api/v1/assessments/simulate').set(bearer(session)).send(AUTOMOTIVE);
 
     expect(response.status).toBe(200);
@@ -244,9 +262,10 @@ describe('POST /api/v1/assessments/simulate', () => {
 
 describe('POST /api/v1/assessments (transação atómica)', () => {
   it('grava avaliação e tarefas da empresa da sessão, com setor e faturação da empresa', async () => {
-    const session = await login('gestor@empresa-a.test');
+    const session = await consultantForA();
     const detail = await createAssessmentAs(session);
 
+    expect(detail.companyResolution).toBe('session');
     expect(detail.company.id).toBe(fx.companyA.id);
     expect(detail.sectorProfile).toBe('automotive_molds');
     expect(detail.snapshot.input.annualRevenue).toBe(6_500_000);
@@ -256,6 +275,15 @@ describe('POST /api/v1/assessments (transação atómica)', () => {
     expect(detail.tasks).toHaveLength(4);
     expect(detail.tasks.every((t) => t.companyId === fx.companyA.id && t.assessmentId === detail.id)).toBe(true);
     expect(detail.remediationSummary.totalInvestment).toBe(13_600);
+    // Cada tarefa fica ligada ao requisito que a gerou e a quem gravou o diagnóstico.
+    expect(detail.tasks.map((t) => t.requirementCode).sort()).toEqual([
+      'banking_esg',
+      'carbon_scope_3',
+      'ecovadis',
+      'information_security',
+    ]);
+    expect(detail.tasks.every((t) => t.origin === 'assessment' && t.createdBy === fx.consultant.id)).toBe(true);
+    expect(detail.tasks.every((t) => !/Exigido por/.test(t.description ?? ''))).toBe(true);
 
     const stored = await pool.query('SELECT revenue_at_risk, estimated_spread_penalty, sector_profile FROM assessments');
     expect(stored.rows).toEqual([
@@ -266,7 +294,7 @@ describe('POST /api/v1/assessments (transação atómica)', () => {
 
   it('o resultado gravado coincide com a simulação', async () => {
     const body = { sectorProfile: 'automotive_molds', annualRevenue: 6_500_000, ...AUTOMOTIVE_ANSWERS };
-    const session = await login('gestor@empresa-a.test');
+    const session = await consultantForA();
     const simulation = (await request(app).post('/api/v1/assessments/simulate').set(bearer(session)).send(body))
       .body as FullSimulation;
     const detail = await createAssessmentAs(session, body);
@@ -288,20 +316,54 @@ describe('POST /api/v1/assessments (transação atómica)', () => {
     };
 
     const first = await createAssessmentAs(session, body);
+    expect(first.companyResolution).toBe('created');
     expect(first.company).toMatchObject({ nif, sectorProfile: 'agro_packaging', annualRevenue: 4_000_000, cae: '' });
+    // Com um NIF que já existe usa-se a empresa que lá está, tal como está, e a resposta diz que foi isso.
     const second = await createAssessmentAs(session, { ...body, company: { name: 'Outro nome', nif } });
-    expect(second.company.id).toBe(first.company.id);
+    expect(second.companyResolution).toBe('existing');
+    expect(second.company).toMatchObject({ id: first.company.id, name: 'Plásticos da Reunião, Lda' });
     expect(await count('companies')).toBe(3);
   });
 
-  it('utilizador da empresa não pode criar empresas', async () => {
+  it('pedidos em simultâneo para o mesmo NIF novo criam uma só empresa', async () => {
+    const session = await login('consultora@p4s.test');
+    const body = { ...AUTOMOTIVE_ANSWERS, company: { name: 'Corrida, Lda', nif: nifFrom('51777777') } };
+    const responses = await Promise.all(
+      Array.from({ length: 6 }, () => request(app).post('/api/v1/assessments').set(bearer(session)).send(body)),
+    );
+    expect(responses.map((r) => r.status)).toEqual([201, 201, 201, 201, 201, 201]);
+    expect(responses.filter((r) => r.body.companyResolution === 'created')).toHaveLength(1);
+    expect(new Set(responses.map((r) => r.body.company.id)).size).toBe(1);
+    expect(await count('companies')).toBe(3);
+    expect(await count('assessments')).toBe(6);
+  });
+
+  it('a conta de uma empresa não grava diagnósticos nem cria empresas', async () => {
     const session = await login('gestor@empresa-a.test');
-    const response = await request(app)
+    const own = await request(app).post('/api/v1/assessments').set(bearer(session)).send(AUTOMOTIVE_ANSWERS);
+    expect(own.status).toBe(403);
+    const quick = await request(app)
       .post('/api/v1/assessments')
       .set(bearer(session))
       .send({ ...AUTOMOTIVE_ANSWERS, company: { name: 'Fantasma', nif: nifFrom('59999999') } });
-    expect(response.status).toBe(403);
+    expect(quick.status).toBe(403);
     expect(await count('companies')).toBe(2);
+    expect(await count('assessments')).toBe(0);
+    expect(await count('tasks')).toBe(0);
+  });
+
+  it('faturação no teto aceite fica gravada sem erro, e acima do teto é recusada', async () => {
+    const session = await consultantForA();
+    const everything = { ...AUTOMOTIVE_ANSWERS, topClientsShare: 100, carbonFootprintScope12: false };
+    const atLimit = await createAssessmentAs(session, { ...everything, annualRevenue: 999_999_999_999.99 });
+    expect(atLimit.commercialRevenueAtRisk).toBe(1_000_000_000_000);
+
+    const above = await request(app)
+      .post('/api/v1/assessments')
+      .set(bearer(session))
+      .send({ ...everything, annualRevenue: 1_000_000_000_000 });
+    expect(above.status).toBe(400);
+    expect(above.body.error.code).toBe('VALIDATION_ERROR');
   });
 
   it('sem empresa na sessão nem criação rápida responde 400', async () => {
@@ -339,7 +401,7 @@ describe('isolamento multi-tenant', () => {
   let sessionB: AuthSession;
 
   beforeEach(async () => {
-    detailA = await createAssessmentAs(await login('gestor@empresa-a.test'));
+    detailA = await createAssessmentAs(await consultantForA());
     sessionB = await login('gestor@empresa-b.test');
   });
 
@@ -394,39 +456,76 @@ describe('RBAC das tarefas', () => {
 
   beforeEach(async () => {
     sessionA = await login('gestor@empresa-a.test');
-    consultantA = await login('consultora@p4s.test', fx.companyA.id);
-    detail = await createAssessmentAs(sessionA);
+    consultantA = await consultantForA();
+    detail = await createAssessmentAs(consultantA);
   });
 
-  it('utilizador da empresa atualiza estado, prazo e responsável de tarefas P4S', async () => {
+  it('utilizador da empresa atualiza o estado e o responsável das tarefas do diagnóstico', async () => {
     const ecovadis = taskByDomain(detail, 'ecovadis');
     const response = await request(app)
       .put(`/api/v1/tasks/${ecovadis.id}`)
       .set(bearer(sessionA))
-      .send({ status: 'in_progress', deadline: '2027-03-01', assignedUserId: fx.userA.id });
+      .send({ status: 'in_progress', assignedUserId: fx.userA.id });
     expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({ status: 'in_progress', deadline: '2027-03-01', assignedUserId: fx.userA.id });
+    expect(response.body).toMatchObject({ status: 'in_progress', assignedUserId: fx.userA.id, updatedBy: fx.userA.id });
   });
 
   it.each([
-    ['custo de tarefa P4S', 'ecovadis', { estimatedCost: 1 }],
-    ['custo de tarefa do parceiro', 'information_security', { estimatedCost: 1 }],
-    ['executor de tarefa P4S', 'ecovadis', { executorType: 'internal' }],
-    ['inclusão na proposta', 'banking_esg', { includedInProposal: false }],
-    ['fase', 'ecovadis', { phase: 'phase_2_structural' }],
-  ] as const)('utilizador da empresa não altera %s', async (_label, domain, patch) => {
+    ['o custo de uma tarefa P4S', 'ecovadis', { estimatedCost: 1 }],
+    ['o custo de uma tarefa do parceiro', 'information_security', { estimatedCost: 1 }],
+    ['o executor', 'ecovadis', { executorType: 'internal' }],
+    ['a inclusão na proposta', 'banking_esg', { includedInProposal: false }],
+    ['a fase', 'ecovadis', { phase: 'phase_2_structural' }],
+    ['o título (âmbito)', 'banking_esg', { title: 'Dossier bancário + certificação TISAX, tudo incluído' }],
+    ['a descrição (âmbito)', 'banking_esg', { description: 'Inclui todas as auditorias, sem custos adicionais.' }],
+    ['o prazo', 'ecovadis', { deadline: '2026-11-20' }],
+    ['o domínio', 'ecovadis', { domain: 'circular_economy' }],
+    ['a prioridade', 'ecovadis', { priority: 'low' }],
+  ] as const)('utilizador da empresa não altera %s de um entregável', async (_label, domain, patch) => {
     const task = taskByDomain(detail, domain);
     const response = await request(app).put(`/api/v1/tasks/${task.id}`).set(bearer(sessionA)).send(patch);
     expect(response.status).toBe(403);
+    const stored = await request(app).get(`/api/v1/tasks/${task.id}`).set(bearer(sessionA)).expect(200);
+    expect(stored.body).toEqual(task);
   });
 
-  it('reenviar o mesmo custo não é alteração', async () => {
+  it('reenviar os mesmos valores não é alteração', async () => {
     const ecovadis = taskByDomain(detail, 'ecovadis');
     await request(app)
       .put(`/api/v1/tasks/${ecovadis.id}`)
       .set(bearer(sessionA))
-      .send({ estimatedCost: ecovadis.estimatedCost, status: 'review' })
+      .send({ estimatedCost: ecovadis.estimatedCost, title: ecovadis.title, deadline: ecovadis.deadline, status: 'review' })
       .expect(200);
+  });
+
+  it('passar um entregável a Interno e voltar a P4S não deixa a empresa mexer nos termos', async () => {
+    const scope3 = detail.tasks.find((t) => t.requirementCode === 'carbon_scope_3') as Task;
+    await request(app).put(`/api/v1/tasks/${scope3.id}`).set(bearer(consultantA)).send({ executorType: 'internal' }).expect(200);
+
+    for (const patch of [{ estimatedCost: 1 }, { phase: 'phase_1_urgent' }, { title: 'Outro âmbito' }, { deadline: '2026-11-20' }]) {
+      await request(app).put(`/api/v1/tasks/${scope3.id}`).set(bearer(sessionA)).send(patch).expect(403);
+    }
+
+    const back = await request(app).put(`/api/v1/tasks/${scope3.id}`).set(bearer(consultantA)).send({ executorType: 'p4s' });
+    expect(back.body).toMatchObject({
+      executorType: 'p4s',
+      estimatedCost: 3_800,
+      phase: 'phase_2_structural',
+      title: scope3.title,
+      deadline: scope3.deadline,
+      origin: 'assessment',
+    });
+  });
+
+  it('numa tarefa criada pela P4S, mesmo interna, a empresa só atualiza o estado e o responsável', async () => {
+    const created = await request(app)
+      .post('/api/v1/tasks')
+      .set(bearer(consultantA))
+      .send({ assessmentId: detail.id, title: 'Nomear interlocutor para a recolha de dados', domain: 'ecovadis', executorType: 'internal' });
+    expect(created.body).toMatchObject({ origin: 'p4s', requirementCode: null, createdBy: fx.consultant.id });
+
+    await request(app).put(`/api/v1/tasks/${created.body.id}`).set(bearer(sessionA)).send({ estimatedCost: 50 }).expect(403);
+    await request(app).put(`/api/v1/tasks/${created.body.id}`).set(bearer(sessionA)).send({ status: 'completed' }).expect(200);
   });
 
   it('utilizador da empresa não elimina tarefas', async () => {
@@ -441,10 +540,40 @@ describe('RBAC das tarefas', () => {
       .set(bearer(sessionA))
       .send({ assessmentId: detail.id, title: 'Recolher faturas de energia de 2025', domain: 'carbon_footprint' });
     expect(created.status).toBe(201);
-    expect(created.body.executorType).toBe('internal');
+    expect(created.body).toMatchObject({ executorType: 'internal', origin: 'company', createdBy: fx.userA.id });
 
-    await request(app).put(`/api/v1/tasks/${created.body.id}`).set(bearer(sessionA)).send({ estimatedCost: 300 }).expect(200);
+    await request(app)
+      .put(`/api/v1/tasks/${created.body.id}`)
+      .set(bearer(sessionA))
+      .send({ estimatedCost: 300, title: 'Recolher faturas de energia de 2024 e 2025', deadline: '2026-12-15' })
+      .expect(200);
     await request(app).put(`/api/v1/tasks/${created.body.id}`).set(bearer(sessionA)).send({ executorType: 'p4s' }).expect(403);
+  });
+
+  it('quando a P4S assume uma tarefa criada pela empresa, a empresa deixa de lhe alterar os termos', async () => {
+    const created = await request(app)
+      .post('/api/v1/tasks')
+      .set(bearer(sessionA))
+      .send({ assessmentId: detail.id, title: 'Plano de redução de consumos', domain: 'carbon_footprint', estimatedCost: 500 });
+
+    const assumed = await request(app)
+      .put(`/api/v1/tasks/${created.body.id}`)
+      .set(bearer(consultantA))
+      .send({ executorType: 'p4s', estimatedCost: 2_900 });
+    expect(assumed.body).toMatchObject({ executorType: 'p4s', estimatedCost: 2_900, origin: 'p4s' });
+
+    await request(app).put(`/api/v1/tasks/${created.body.id}`).set(bearer(sessionA)).send({ estimatedCost: 500 }).expect(403);
+    await request(app).put(`/api/v1/tasks/${created.body.id}`).set(bearer(sessionA)).send({ status: 'in_progress' }).expect(200);
+  });
+
+  it('a origem da tarefa não se define pelo pedido', async () => {
+    const task = detail.tasks[0] as Task;
+    await request(app).put(`/api/v1/tasks/${task.id}`).set(bearer(consultantA)).send({ origin: 'company' }).expect(400);
+    await request(app)
+      .post('/api/v1/tasks')
+      .set(bearer(sessionA))
+      .send({ assessmentId: detail.id, title: 'Tarefa com origem forjada', domain: 'ecovadis', origin: 'p4s' })
+      .expect(400);
   });
 
   it('utilizador da empresa não cria tarefas P4S', async () => {
@@ -485,8 +614,8 @@ describe('filtros de tarefas', () => {
   let session: AuthSession;
 
   beforeEach(async () => {
+    await createAssessmentAs(await consultantForA());
     session = await login('gestor@empresa-a.test');
-    await createAssessmentAs(session);
   });
 
   it.each([
@@ -540,30 +669,65 @@ describe('empresas', () => {
       .expect(403);
   });
 
-  it('lista responsáveis possíveis: utilizadores ativos da empresa e equipa P4S', async () => {
+  it('lista responsáveis possíveis (utilizadores ativos da empresa e equipa P4S) sem emails nem papéis', async () => {
     const session = await login('gestor@empresa-a.test');
     const response = await request(app).get('/api/v1/companies/current/users').set(bearer(session)).expect(200);
-    const emails = (response.body as { email: string }[]).map((u) => u.email).sort();
-    expect(emails).toEqual(['admin@p4s.test', 'consultora@p4s.test', 'gestor@empresa-a.test']);
+    const users = response.body as AssignableUser[];
+    expect(users.map((u) => [u.fullName, u.team]).sort()).toEqual([
+      ['Admin P4S', 'p4s'],
+      ['Consultora P4S', 'p4s'],
+      ['Gestor A', 'company'],
+    ]);
+    expect(users.every((u) => Object.keys(u).sort().join() === 'fullName,id,team')).toBe(true);
+    expect(JSON.stringify(response.body)).not.toMatch(/@|admin|consultant/);
+  });
+
+  it('a equipa P4S corrige os dados de uma empresa', async () => {
+    const session = await login('consultora@p4s.test');
+    const updated = await request(app)
+      .put(`/api/v1/companies/${fx.companyA.id}`)
+      .set(bearer(session))
+      .send({ name: 'Moldes Exemplo A, SA', cae: '25734', annualRevenue: 7_100_000 });
+    expect(updated.status).toBe(200);
+    expect(updated.body).toMatchObject({ name: 'Moldes Exemplo A, SA', annualRevenue: 7_100_000, nif: fx.companyA.nif });
+    expect(new Date(updated.body.updatedAt).getTime()).toBeGreaterThanOrEqual(new Date(fx.companyA.updatedAt).getTime());
+
+    await request(app).put(`/api/v1/companies/${fx.companyA.id}`).set(bearer(session)).send({ nif: fx.companyB.nif }).expect(409);
+    await request(app).put(`/api/v1/companies/${fx.companyA.id}`).set(bearer(session)).send({}).expect(400);
+    await request(app).put(`/api/v1/companies/${fx.companyA.id}`).set(bearer(session)).send({ nif: '000000000' }).expect(400);
+    await request(app)
+      .put('/api/v1/companies/00000000-0000-4000-8000-000000000000')
+      .set(bearer(session))
+      .send({ name: 'Não existe' })
+      .expect(404);
+  });
+
+  it('a conta de uma empresa não altera os dados da empresa', async () => {
+    const session = await login('gestor@empresa-a.test');
+    await request(app).put(`/api/v1/companies/${fx.companyA.id}`).set(bearer(session)).send({ name: 'Outro nome' }).expect(403);
   });
 });
 
-describe('GET /api/v1/catalog (pesos e preços só com sessão)', () => {
+describe('GET /api/v1/catalog (pesos e preços só para a equipa P4S)', () => {
   it('recusa pedidos sem sessão', async () => {
     const response = await request(app).get('/api/v1/catalog');
     expect(response.status).toBe(401);
     expect(JSON.stringify(response.body)).not.toMatch(/weightPoints|estimatedCost/);
   });
 
-  it('devolve o catálogo a qualquer utilizador com sessão, sem cache partilhada', async () => {
-    for (const email of ['gestor@empresa-a.test', 'consultora@p4s.test']) {
-      const response = await request(app).get('/api/v1/catalog').set(bearer(await login(email)));
-      expect(response.status).toBe(200);
-      expect(response.headers['cache-control']).toMatch(/private/);
-      expect(response.body.spreadPenaltyBps).toBe(40);
-      expect(response.body.parameters.ecovadis.task.estimatedCost).toBe(3500);
-      expect(response.body.dealbreakers).toHaveLength(2);
-    }
+  it('recusa a conta de uma empresa', async () => {
+    const response = await request(app).get('/api/v1/catalog').set(bearer(await login('gestor@empresa-a.test')));
+    expect(response.status).toBe(403);
+    expect(JSON.stringify(response.body)).not.toMatch(/weightPoints|estimatedCost/);
+  });
+
+  it('devolve o catálogo à equipa P4S, sem ficar em cache', async () => {
+    const response = await request(app).get('/api/v1/catalog').set(bearer(await login('consultora@p4s.test')));
+    expect(response.status).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.body.spreadPenaltyBps).toBe(40);
+    expect(response.body.parameters.ecovadis.task.estimatedCost).toBe(3500);
+    expect(response.body.dealbreakers).toHaveLength(2);
   });
 });
 

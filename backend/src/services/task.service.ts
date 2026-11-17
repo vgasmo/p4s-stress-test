@@ -2,19 +2,29 @@
 //
 // Regras para company_user (utilizador da fábrica):
 //   - não elimina tarefas (a rota DELETE só aceita a equipa P4S);
-//   - em tarefas P4S ou do parceiro não altera os termos da proposta: custo estimado,
-//     executor, fase e inclusão na proposta. Pode atualizar estado, prazo e responsável;
-//   - só cria tarefas internas e não passa tarefas internas para a P4S ou o parceiro.
+//   - nas tarefas que não criou (as do diagnóstico e as criadas pela P4S) só atualiza o estado
+//     e o responsável. Âmbito, prazo, preço, executor, fase e inclusão na proposta são da P4S,
+//     seja qual for o executor do momento: passar um entregável a «Interno» e voltar atrás
+//     não deixa a empresa mexer nos termos;
+//   - nas tarefas que criou, sempre internas, altera tudo menos o executor.
+// Quando a equipa P4S passa uma tarefa da empresa para a P4S ou para o parceiro, assume-a:
+// a partir daí a empresa só a acompanha.
 
 import { pool, withTransaction, type Queryable } from '../config/database.js';
 import { assessmentModel } from '../models/assessment.model.js';
-import { isPricedExecutor, isStaffRole, type Task, type TenantContext } from '../models/domain.js';
+import {
+  COMPANY_FOLLOW_UP_FIELDS,
+  isPricedExecutor,
+  isStaffRole,
+  type Task,
+  type TenantContext,
+} from '../models/domain.js';
 import type { CreateTaskInput, TaskListQuery, UpdateTaskInput } from '../models/schemas.js';
-import { taskModel, type TaskPatch } from '../models/task.model.js';
+import { taskModel, type TaskFields, type TaskPatch } from '../models/task.model.js';
 import { userModel } from '../models/user.model.js';
 import { badRequest, forbidden, notFound } from '../utils/errors.js';
 
-const PROPOSAL_TERMS = ['estimatedCost', 'executorType', 'phase', 'includedInProposal'] as const;
+const FOLLOW_UP_FIELDS: readonly string[] = COMPANY_FOLLOW_UP_FIELDS;
 
 async function assertAssignable(db: Queryable, companyId: string, userId: string): Promise<void> {
   const user = await userModel.findById(db, userId);
@@ -23,11 +33,13 @@ async function assertAssignable(db: Queryable, companyId: string, userId: string
 }
 
 function assertCompanyUserCanPatch(current: Task, patch: TaskPatch): void {
-  if (isPricedExecutor(current.executorType)) {
-    const changed = PROPOSAL_TERMS.filter((field) => patch[field] !== undefined && patch[field] !== current[field]);
+  if (current.origin !== 'company') {
+    const changed = (Object.keys(patch) as (keyof TaskFields)[]).filter(
+      (field) => !FOLLOW_UP_FIELDS.includes(field) && patch[field] !== current[field],
+    );
     if (changed.length > 0) {
       throw forbidden(
-        'Custo, executor, fase e inclusão na proposta de tarefas da P4S ou do parceiro só podem ser alterados pela P4S.',
+        'Esta tarefa foi definida pela P4S. Pode atualizar o estado e o responsável. O resto só a P4S altera.',
       );
     }
     return;
@@ -86,6 +98,9 @@ export const taskService = {
       estimatedCost: input.estimatedCost,
       deadline: input.deadline ?? null,
       assignedUserId: input.assignedUserId ?? null,
+      requirementCode: null,
+      origin: staff ? 'p4s' : 'company',
+      createdBy: ctx.userId,
     });
   },
 
@@ -94,10 +109,20 @@ export const taskService = {
     return withTransaction(async (client) => {
       const current = await taskModel.findById(client, ctx.companyId, id, { forUpdate: true });
       if (!current) throw notFound('Tarefa não encontrada.');
-      if (!isStaffRole(ctx.role)) assertCompanyUserCanPatch(current, patch);
+
+      if (!isStaffRole(ctx.role)) {
+        assertCompanyUserCanPatch(current, patch);
+      } else if (
+        current.origin === 'company' &&
+        patch.executorType !== undefined &&
+        isPricedExecutor(patch.executorType)
+      ) {
+        // A P4S assume uma tarefa criada pela empresa: os termos deixam de ser editáveis por ela.
+        patch.origin = 'p4s';
+      }
       if (patch.assignedUserId) await assertAssignable(client, ctx.companyId, patch.assignedUserId);
 
-      const updated = await taskModel.update(client, ctx.companyId, id, patch);
+      const updated = await taskModel.update(client, ctx.companyId, id, patch, ctx.userId);
       if (!updated) throw notFound('Tarefa não encontrada.');
       return updated;
     });

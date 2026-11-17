@@ -7,18 +7,20 @@ export const notFoundHandler: RequestHandler = (req) => {
   throw notFound(`Rota inexistente: ${req.method} ${req.path}`);
 };
 
-interface BodyParserError {
-  type: string;
-  status: number;
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+
+/** Erros do Express e dos seus parsers trazem o código HTTP em status ou statusCode. */
+function clientErrorStatus(error: unknown): number | undefined {
+  if (!isRecord(error)) return undefined;
+  const status = typeof error.status === 'number' ? error.status : error.statusCode;
+  return typeof status === 'number' && status >= 400 && status < 500 ? status : undefined;
 }
 
-const isBodyParserError = (error: unknown): error is BodyParserError =>
-  typeof error === 'object' && error !== null && 'type' in error && 'status' in error;
+const errorType = (error: unknown): string | undefined =>
+  isRecord(error) && typeof error.type === 'string' ? error.type : undefined;
 
 const pgCode = (error: unknown): string | undefined =>
-  typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
-    ? error.code
-    : undefined;
+  isRecord(error) && typeof error.code === 'string' && /^[0-9A-Z]{5}$/.test(error.code) ? error.code : undefined;
 
 const send = (res: Parameters<ErrorRequestHandler>[2], status: number, body: ApiErrorBody) => {
   res.status(status).json(body);
@@ -43,11 +45,17 @@ export const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
     return;
   }
 
-  if (isBodyParserError(error)) {
-    const tooLarge = error.type === 'entity.too.large';
-    send(res, tooLarge ? 413 : 400, {
-      error: { code: 'BAD_REQUEST', message: tooLarge ? 'Pedido demasiado grande.' : 'JSON inválido.' },
-    });
+  // Pedido mal formado (JSON inválido, corpo comprimido ilegível, parâmetro mal codificado,
+  // corpo demasiado grande): a culpa é de quem envia, por isso 4xx e nada no registo de erros.
+  const status = clientErrorStatus(error);
+  if (status !== undefined) {
+    const message =
+      status === 413
+        ? 'Pedido demasiado grande.'
+        : errorType(error) === 'entity.parse.failed'
+          ? 'JSON inválido.'
+          : 'Pedido inválido.';
+    send(res, status, { error: { code: 'BAD_REQUEST', message } });
     return;
   }
 
@@ -58,6 +66,11 @@ export const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
   }
   if (code === '23503' || code === '23514') {
     send(res, 400, { error: { code: 'BAD_REQUEST', message: 'Dados incompatíveis com registos existentes.' } });
+    return;
+  }
+  // Classe 22: valor que a base de dados não consegue guardar (fora dos limites, carácter inválido).
+  if (code?.startsWith('22')) {
+    send(res, 400, { error: { code: 'BAD_REQUEST', message: 'Dados inválidos: há um valor fora dos limites aceites.' } });
     return;
   }
 

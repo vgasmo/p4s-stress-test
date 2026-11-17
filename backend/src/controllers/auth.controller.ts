@@ -24,17 +24,22 @@ export const authController = {
     res.json(await authService.me(getAuth(req)));
   },
 
+  async logout(req: Request, res: Response): Promise<void> {
+    await authService.logout(getAuth(req));
+    res.status(204).end();
+  },
+
   async inspectPasswordLink(req: Request, res: Response): Promise<void> {
     const { token } = validated<InspectPasswordLinkInput>(req, 'body');
-    res.set('Cache-Control', 'no-store').json(await userService.inspectPasswordLink(token));
+    res.json(await userService.inspectPasswordLink(token));
   },
 
   async setPassword(req: Request, res: Response): Promise<void> {
-    res.set('Cache-Control', 'no-store').json(await userService.setPassword(validated<SetPasswordInput>(req, 'body')));
+    res.json(await userService.setPassword(validated<SetPasswordInput>(req, 'body')));
   },
 
   async changePassword(req: Request, res: Response): Promise<void> {
     const session = await userService.changePassword(getAuth(req), validated<ChangePasswordInput>(req, 'body'));
-    res.set('Cache-Control', 'no-store').json(session);
+    res.json(session);
   },
 };

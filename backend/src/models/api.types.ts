@@ -45,11 +45,11 @@ export interface MeResponse {
 
 // ── Utilizadores ────────────────────────────────────────────────────────────────────
 
+/** Possível responsável por uma tarefa. Sem email nem papel: os clientes também recebem esta lista. */
 export interface AssignableUser {
   id: string;
   fullName: string;
-  email: string;
-  role: UserRole;
+  team: 'p4s' | 'company';
 }
 
 /** invited: ainda não definiu palavra-passe. disabled: conta desativada. */
@@ -193,6 +193,15 @@ export interface AssessmentSnapshot {
   requirements: RequirementSnapshot[];
 }
 
+/** Datas da proposta de honorários (dias de calendário de Lisboa, AAAA-MM-DD). */
+export interface ProposalInfo {
+  issuedOn: string;
+  validUntil: string;
+  validityDays: number;
+  /** Passou a validade: os honorários e os prazos deixam de estar garantidos até a P4S reemitir. */
+  expired: boolean;
+}
+
 export interface CompanySummary {
   id: string;
   name: string;
@@ -216,9 +225,18 @@ export interface AssessmentDetail {
   createdAt: string;
   company: CompanySummary;
   snapshot: AssessmentSnapshot;
+  proposal: ProposalInfo;
   /** Calculado sobre as tarefas atuais (reflete o que foi configurado na proposta). */
   remediationSummary: RemediationSummary;
   tasks: Task[];
+}
+
+/** session: a empresa selecionada. created: criada agora pelo NIF. existing: já existia com esse NIF. */
+export type CompanyResolution = 'session' | 'created' | 'existing';
+
+/** Resposta de POST /assessments. */
+export interface CreatedAssessment extends AssessmentDetail {
+  companyResolution: CompanyResolution;
 }
 
 export interface AssessmentListEntry {
@@ -229,6 +247,9 @@ export interface AssessmentListEntry {
   commercialRevenueAtRisk: number;
   estimatedSpreadPenalty: number;
   taskCount: number;
+  /** false: rascunho ou diagnóstico de uma versão anterior, sem dados que se consigam abrir. */
+  openable: boolean;
+  proposal: ProposalInfo;
   conductedByName: string | null;
   completedAt: string | null;
   createdAt: string;

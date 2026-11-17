@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CATALOG } from '../../src/services/catalog.private.js';
-import type { StressTestInput } from '../../src/services/requirements.js';
+import { describeSources, type StressTestInput } from '../../src/services/requirements.js';
 import {
   StressTestCalculatorService,
   type RequirementEvaluation,
@@ -90,10 +90,11 @@ describe('TaskGeneratorService, as 5 tarefas-tipo', () => {
     expect(tasks.every((task) => task.status === 'backlog' && task.includedInProposal)).toBe(true);
   });
 
-  it('cada tarefa tem remetente concreto e indica-o na descrição', () => {
+  it('cada tarefa tem remetente concreto, como campo e não como texto na descrição', () => {
     for (const task of tasks) {
       expect(task.requiredBy.length).toBeGreaterThan(0);
-      expect(task.description).toMatch(/Exigido por: (Cliente industrial|Banco)/);
+      expect(describeSources(task.requiredBy)).toMatch(/Cliente industrial|Banco/);
+      expect(task.description).not.toMatch(/Exigido por/);
     }
     expect(tasks.find((t) => t.requirementCode === 'banking_esg')?.requiredBy).toEqual(['bank']);
     expect(tasks.find((t) => t.requirementCode === 'information_security')?.requiredBy).toEqual([
@@ -104,7 +105,7 @@ describe('TaskGeneratorService, as 5 tarefas-tipo', () => {
 
   it('a NIS2 nunca aparece como obrigação certa', () => {
     const infosec = tasks.find((t) => t.requirementCode === 'information_security');
-    expect(infosec?.description).toContain('Exigido por: Cliente industrial / NIS2 (se a empresa estiver abrangida).');
+    expect(describeSources(infosec?.requiredBy ?? [])).toBe('Cliente industrial / NIS2 (se a empresa estiver abrangida)');
     expect(infosec?.description).toContain('A auditoria confirma se a empresa está abrangida pela NIS2');
     for (const task of tasks) expect(task.description).not.toMatch(/Diretiva NIS2|Lei NIS2|obrigação legal/i);
   });

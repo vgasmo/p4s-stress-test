@@ -2,17 +2,20 @@
 // company_id vem sempre do contexto autenticado, nunca do corpo do pedido.
 
 import type { Queryable } from '../config/database.js';
+import type { RequirementCode } from '../services/requirements.js';
 import type {
   Task,
   TaskDomain,
   TaskExecutor,
+  TaskOrigin,
   TaskPhase,
   TaskPriority,
   TaskStatus,
 } from './domain.js';
 
 const COLUMNS = `id, assessment_id, company_id, title, description, domain, priority, status, executor_type,
-  phase, included_in_proposal, estimated_cost, deadline, assigned_user_id, created_at, updated_at`;
+  phase, included_in_proposal, estimated_cost, deadline, assigned_user_id, requirement_code, origin,
+  created_by, updated_by, created_at, updated_at`;
 
 // Os enums ordenam pela ordem de declaração: fase 1 antes da 2, critical antes de low.
 const ORDER_BY = 'ORDER BY phase, priority, deadline NULLS LAST, created_at, id';
@@ -32,6 +35,10 @@ interface TaskRow {
   estimated_cost: number;
   deadline: string | null;
   assigned_user_id: string | null;
+  requirement_code: RequirementCode | null;
+  origin: TaskOrigin;
+  created_by: string | null;
+  updated_by: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -51,11 +58,16 @@ const toTask = (row: TaskRow): Task => ({
   estimatedCost: row.estimated_cost,
   deadline: row.deadline,
   assignedUserId: row.assigned_user_id,
+  requirementCode: row.requirement_code,
+  origin: row.origin,
+  createdBy: row.created_by,
+  updatedBy: row.updated_by,
   createdAt: row.created_at.toISOString(),
   updatedAt: row.updated_at.toISOString(),
 });
 
-export interface NewTask {
+/** Campos que se editam numa tarefa. */
+export interface TaskFields {
   title: string;
   description: string | null;
   domain: TaskDomain;
@@ -69,7 +81,14 @@ export interface NewTask {
   assignedUserId: string | null;
 }
 
-export type TaskPatch = Partial<NewTask>;
+export interface NewTask extends TaskFields {
+  requirementCode: RequirementCode | null;
+  origin: TaskOrigin;
+  createdBy: string | null;
+}
+
+/** origin só muda por regra do serviço (a P4S assume uma tarefa da empresa), nunca pelo pedido. */
+export type TaskPatch = Partial<TaskFields> & { origin?: TaskOrigin };
 
 export interface TaskFilters {
   status?: TaskStatus | undefined;
@@ -94,6 +113,10 @@ const INSERT_COLUMNS = [
   'estimated_cost',
   'deadline',
   'assigned_user_id',
+  'requirement_code',
+  'origin',
+  'created_by',
+  'updated_by',
 ] as const;
 
 const PATCH_COLUMNS: Record<keyof TaskPatch, string> = {
@@ -108,6 +131,7 @@ const PATCH_COLUMNS: Record<keyof TaskPatch, string> = {
   estimatedCost: 'estimated_cost',
   deadline: 'deadline',
   assignedUserId: 'assigned_user_id',
+  origin: 'origin',
 };
 
 const rowValues = (companyId: string, assessmentId: string, task: NewTask): unknown[] => [
@@ -124,6 +148,10 @@ const rowValues = (companyId: string, assessmentId: string, task: NewTask): unkn
   task.estimatedCost,
   task.deadline,
   task.assignedUserId,
+  task.requirementCode,
+  task.origin,
+  task.createdBy,
+  task.createdBy,
 ];
 
 export const taskModel = {
@@ -179,7 +207,13 @@ export const taskModel = {
     return rows[0] ? toTask(rows[0]) : null;
   },
 
-  async update(db: Queryable, companyId: string, id: string, patch: TaskPatch): Promise<Task | null> {
+  async update(
+    db: Queryable,
+    companyId: string,
+    id: string,
+    patch: TaskPatch,
+    updatedBy: string | null,
+  ): Promise<Task | null> {
     const sets: string[] = [];
     const values: unknown[] = [companyId, id];
     for (const [key, column] of Object.entries(PATCH_COLUMNS) as [keyof TaskPatch, string][]) {
@@ -189,7 +223,8 @@ export const taskModel = {
       sets.push(`${column} = $${values.length}`);
     }
     if (sets.length === 0) return taskModel.findById(db, companyId, id);
-    sets.push('updated_at = CURRENT_TIMESTAMP');
+    values.push(updatedBy);
+    sets.push(`updated_by = $${values.length}`, 'updated_at = CURRENT_TIMESTAMP');
 
     const { rows } = await db.query<TaskRow>(
       `UPDATE tasks SET ${sets.join(', ')} WHERE company_id = $1 AND id = $2 RETURNING ${COLUMNS}`,
@@ -201,5 +236,19 @@ export const taskModel = {
   async remove(db: Queryable, companyId: string, id: string): Promise<boolean> {
     const { rowCount } = await db.query(`DELETE FROM tasks WHERE company_id = $1 AND id = $2`, [companyId, id]);
     return (rowCount ?? 0) > 0;
+  },
+
+  /**
+   * Reemissão da proposta: os entregáveis da P4S e do parceiro que ainda não começaram
+   * deslizam o mesmo número de dias, para manterem a duração prometida.
+   */
+  async shiftPendingDeliverables(db: Queryable, companyId: string, assessmentId: string, days: number): Promise<number> {
+    const { rowCount } = await db.query(
+      `UPDATE tasks SET deadline = deadline + $3::int, updated_at = CURRENT_TIMESTAMP
+       WHERE company_id = $1 AND assessment_id = $2 AND status = 'backlog'
+         AND executor_type IN ('p4s', 'partner') AND deadline IS NOT NULL`,
+      [companyId, assessmentId, days],
+    );
+    return rowCount ?? 0;
   },
 };

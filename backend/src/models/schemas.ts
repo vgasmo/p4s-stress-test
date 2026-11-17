@@ -2,8 +2,9 @@
 
 import { z } from 'zod';
 import { MAX_MONEY_AMOUNT } from '../services/stress-test-calculator.service.js';
+import { formatEUR } from '../utils/currency.js';
 import { isValidIsoDate } from '../utils/dates.js';
-import { isValidCae, isValidNif } from '../utils/validation.js';
+import { isPlainText, isSingleLineText, isValidCae, isValidNif } from '../utils/validation.js';
 import {
   PASSWORD_MAX_BYTES,
   PASSWORD_MIN_LENGTH,
@@ -16,15 +17,32 @@ import {
   TASK_STATUSES,
 } from './domain.js';
 
+// As mensagens que o zod gera sozinho (tipos, limites, campos desconhecidos) saem em português.
+z.config(z.locales.pt());
+
+const FORBIDDEN_CHARACTERS = 'Tem caracteres que não são aceites.';
+
+/** Texto de uma linha: nomes e títulos. */
+const lineText = (min: number, max: number, tooShort: string) =>
+  z
+    .string()
+    .trim()
+    .min(min, tooShort)
+    .max(max, `Máximo ${max} caracteres.`)
+    .refine(isSingleLineText, FORBIDDEN_CHARACTERS);
+
 const id = z.guid('Identificador inválido.');
-const money = z.number().nonnegative('Não pode ser negativo.').max(MAX_MONEY_AMOUNT);
+const money = z
+  .number()
+  .nonnegative('Não pode ser negativo.')
+  .max(MAX_MONEY_AMOUNT, `Máximo ${formatEUR(MAX_MONEY_AMOUNT)}.`);
 /** NUMERIC(10, 2) */
-const taskCost = z.number().nonnegative('Não pode ser negativo.').max(99_999_999.99);
+const taskCost = z.number().nonnegative('Não pode ser negativo.').max(99_999_999.99, 'Máximo 99.999.999,99 €.');
 const isoDate = z.string().refine(isValidIsoDate, 'Data inválida (AAAA-MM-DD).');
 const share = z.number().min(0, 'Mínimo 0%.').max(100, 'Máximo 100%.');
 const nif = z.string().trim().refine(isValidNif, 'NIF inválido.');
 const cae = z.string().trim().refine(isValidCae, 'CAE inválido (5 dígitos).');
-const companyName = z.string().trim().min(2, 'Nome demasiado curto.').max(255);
+const companyName = lineText(2, 255, 'Nome demasiado curto.');
 const sectorProfile = z.enum(SECTOR_PROFILES);
 
 export const idParamsSchema = z.object({ id });
@@ -69,7 +87,7 @@ export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 // Utilizadores
 
 const email = z.string().trim().toLowerCase().max(255).pipe(z.email('Email inválido.'));
-const fullName = z.string().trim().min(2, 'Nome demasiado curto.').max(150);
+const fullName = lineText(2, 150, 'Nome demasiado curto.');
 
 export const createUserSchema = z.strictObject({
   email,
@@ -97,6 +115,20 @@ export const createCompanySchema = z.strictObject({
   exportPercentage: share.default(0),
 });
 export type CreateCompanyInput = z.infer<typeof createCompanySchema>;
+
+export const updateCompanySchema = z
+  .strictObject({
+    name: companyName.optional(),
+    nif: nif.optional(),
+    cae: cae.optional(),
+    sectorProfile: sectorProfile.optional(),
+    annualRevenue: money.optional(),
+    exportPercentage: share.optional(),
+  })
+  .refine((patch) => Object.values(patch).some((value) => value !== undefined), {
+    message: 'Indique pelo menos um campo a alterar.',
+  });
+export type UpdateCompanyInput = z.infer<typeof updateCompanySchema>;
 
 /** Criação rápida em reunião: NIF + nome chegam. */
 export const quickCompanySchema = z.strictObject({
@@ -149,8 +181,8 @@ export const taskListQuerySchema = z.strictObject({
 export type TaskListQuery = z.infer<typeof taskListQuerySchema>;
 
 const taskFields = {
-  title: z.string().trim().min(3, 'Título demasiado curto.').max(255),
-  description: z.string().trim().max(5000).nullable(),
+  title: lineText(3, 255, 'Título demasiado curto.'),
+  description: z.string().trim().max(5000, 'Máximo 5000 caracteres.').refine(isPlainText, FORBIDDEN_CHARACTERS).nullable(),
   domain: z.enum(TASK_DOMAINS),
   priority: z.enum(TASK_PRIORITIES),
   status: z.enum(TASK_STATUSES),

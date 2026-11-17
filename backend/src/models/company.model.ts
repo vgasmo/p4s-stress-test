@@ -70,4 +70,51 @@ export const companyModel = {
     );
     return toCompany(rows[0] as CompanyRow);
   },
+
+  /**
+   * Cria a empresa se o NIF ainda não existir. Com pedidos em simultâneo para o mesmo NIF,
+   * só um insere e os outros recebem null (e leem a que ficou).
+   */
+  async insertIfAbsent(db: Queryable, company: NewCompany): Promise<Company | null> {
+    const { rows } = await db.query<CompanyRow>(
+      `INSERT INTO companies (name, nif, cae, sector_profile, annual_revenue, export_percentage)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (nif) DO NOTHING
+       RETURNING ${COLUMNS}`,
+      [
+        company.name,
+        company.nif,
+        company.cae,
+        company.sectorProfile,
+        company.annualRevenue,
+        company.exportPercentage,
+      ],
+    );
+    return rows[0] ? toCompany(rows[0]) : null;
+  },
+
+  async update(db: Queryable, id: string, patch: Partial<NewCompany>): Promise<Company | null> {
+    const { rows } = await db.query<CompanyRow>(
+      `UPDATE companies
+       SET name = COALESCE($2, name),
+           nif = COALESCE($3, nif),
+           cae = COALESCE($4, cae),
+           sector_profile = COALESCE($5, sector_profile),
+           annual_revenue = COALESCE($6, annual_revenue),
+           export_percentage = COALESCE($7, export_percentage),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING ${COLUMNS}`,
+      [
+        id,
+        patch.name ?? null,
+        patch.nif ?? null,
+        patch.cae ?? null,
+        patch.sectorProfile ?? null,
+        patch.annualRevenue ?? null,
+        patch.exportPercentage ?? null,
+      ],
+    );
+    return rows[0] ? toCompany(rows[0]) : null;
+  },
 };

@@ -1,25 +1,56 @@
 // Lei do código: nenhuma query a assessments ou tasks corre sem company_id = $1.
-// Este teste lê o SQL dos models e falha se alguém acrescentar uma query sem o filtro.
+// Este teste lê o SQL de todo o código da API e falha se alguém acrescentar, em qualquer
+// ficheiro, uma query a essas tabelas sem o filtro (ou com um OR que o contorne).
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const MODELS = ['assessment.model.ts', 'task.model.ts'];
+const ROOT = path.resolve('src');
+const TENANT_TABLE = /\b(?:FROM|JOIN|UPDATE|INTO)\s+(?:tasks|assessments)\b/i;
 
-function sqlStatements(file: string): string[] {
-  const source = readFileSync(path.resolve('src/models', file), 'utf8');
-  return [...source.matchAll(/`([^`]*)`/g)]
-    .map((match) => match[1] ?? '')
-    .filter((sql) => /\b(SELECT|UPDATE|DELETE)\b/.test(sql));
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) return sourceFiles(full);
+    return entry.name.endsWith('.ts') ? [full] : [];
+  });
+}
+
+/** Texto entre crases, aspas ou plicas que mexe em tasks ou assessments. */
+function tenantStatements(file: string): string[] {
+  const source = readFileSync(file, 'utf8');
+  const literals = [...source.matchAll(/`([^`]*)`|'([^'\n]*)'|"([^"\n]*)"/g)].map(
+    (match) => match[1] ?? match[2] ?? match[3] ?? '',
+  );
+  return literals.filter((sql) => TENANT_TABLE.test(sql) && /\b(SELECT|UPDATE|DELETE|INSERT)\b/.test(sql));
 }
 
 describe('isolamento multi-tenant no SQL', () => {
-  for (const file of MODELS) {
-    it(`${file}: todas as leituras, alterações e remoções filtram por company_id = $1`, () => {
-      const statements = sqlStatements(file);
-      expect(statements.length).toBeGreaterThan(0);
-      for (const sql of statements) expect(sql, sql).toMatch(/company_id = \$1/);
-    });
-  }
+  const statements = sourceFiles(ROOT).flatMap((file) =>
+    tenantStatements(file).map((sql) => ({ file: path.relative(ROOT, file), sql })),
+  );
+
+  it('encontra as queries dos models', () => {
+    expect(statements.length).toBeGreaterThanOrEqual(10);
+    expect(new Set(statements.map((s) => s.file))).toEqual(new Set(['models/assessment.model.ts', 'models/task.model.ts']));
+  });
+
+  it('todas as leituras, alterações e remoções filtram por company_id = $1, sem OR', () => {
+    for (const { file, sql } of statements.filter((s) => /\b(SELECT|UPDATE|DELETE)\b/.test(s.sql) && !/\bINSERT\b/.test(s.sql))) {
+      expect(sql, `${file}: ${sql}`).toMatch(/company_id = \$1/);
+      expect(sql, `${file}: ${sql}`).not.toMatch(/\bOR\b/i);
+    }
+  });
+
+  it('as inserções gravam a empresa do contexto como primeiro valor', () => {
+    const inserts = statements.filter((s) => /\bINSERT\b/.test(s.sql));
+    expect(inserts.length).toBeGreaterThanOrEqual(2);
+    for (const { file, sql } of inserts) {
+      // INSERT INTO tasks (${INSERT_COLUMNS…}) ou INSERT INTO assessments (company_id, …) VALUES ($1, …)
+      expect(sql, `${file}: ${sql}`).toMatch(/INSERT INTO (?:assessments \(company_id\b|tasks \(\$\{INSERT_COLUMNS)/);
+    }
+    const taskModel = readFileSync(path.join(ROOT, 'models/task.model.ts'), 'utf8');
+    expect(taskModel).toMatch(/const INSERT_COLUMNS = \[\s*'company_id',/);
+  });
 });

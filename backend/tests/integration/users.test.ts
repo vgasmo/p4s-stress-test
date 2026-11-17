@@ -238,9 +238,11 @@ describe('desativar e reativar', () => {
     const admin2 = admin2Pending.body as AuthSession;
     await request(app).put(`/api/v1/users/${fx.admin.id}`).set(bearer(admin2)).send({ isActive: false }).expect(200);
 
-    // O primeiro ainda tem um access token válido, mas já não pode deixar a equipa sem administrador.
+    // A sessão do primeiro termina no momento em que é desativado: já não consegue desativar o segundo.
     const response = await request(app).put(`/api/v1/users/${second.id}`).set(bearer(admin1)).send({ isActive: false });
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(401);
+    // E ninguém se desativa a si próprio, por isso fica sempre um administrador com acesso.
+    await request(app).put(`/api/v1/users/${second.id}`).set(bearer(admin2)).send({ isActive: false }).expect(400);
   });
 });
 
