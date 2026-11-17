@@ -3,6 +3,7 @@
 
 import { useState } from 'react';
 import { TASK_STATUSES, type Task, type TaskStatus } from '@engine/models/domain';
+import { countsTowardsProposal } from '@engine/services/remediation-summary';
 import { Select } from '@/components/ui/form';
 import { STATUS_LABELS, formatDatePt, formatEUR } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
@@ -12,11 +13,13 @@ import { isOverdue } from './task-rules';
 interface ExecutionKanbanProps {
   tasks: Task[];
   today: string;
+  /** Nome do responsável de cada tarefa, por id de utilizador. */
+  assigneeNames: ReadonlyMap<string, string>;
   onStatusChange: (task: Task, status: TaskStatus) => void;
   onOpen: (task: Task) => void;
 }
 
-export function ExecutionKanban({ tasks, today, onStatusChange, onOpen }: ExecutionKanbanProps) {
+export function ExecutionKanban({ tasks, today, assigneeNames, onStatusChange, onOpen }: ExecutionKanbanProps) {
   const [dropTarget, setDropTarget] = useState<TaskStatus | null>(null);
 
   return (
@@ -80,8 +83,16 @@ export function ExecutionKanban({ tasks, today, onStatusChange, onOpen }: Execut
                         {overdue ? 'Em atraso · ' : ''}
                         {formatDatePt(task.deadline)}
                       </span>
-                      <span className="font-mono tabular-nums text-slate-900">{formatEUR(task.estimatedCost)}</span>
+                      {/* Só os honorários que contam para a proposta: os cartões somam o mesmo que o topo. */}
+                      {countsTowardsProposal(task) ? (
+                        <span className="font-mono tabular-nums text-slate-900">{formatEUR(task.estimatedCost)}</span>
+                      ) : (
+                        <span className="text-slate-600">{task.executorType === 'internal' ? 'Interno' : 'Fora da proposta'}</span>
+                      )}
                     </div>
+                    {task.assignedUserId && assigneeNames.has(task.assignedUserId) && (
+                      <p className="mt-1 truncate text-xs text-slate-600">Responsável: {assigneeNames.get(task.assignedUserId)}</p>
+                    )}
                     <Select
                       aria-label={`Mover «${task.title}»`}
                       containerClassName="mt-2"

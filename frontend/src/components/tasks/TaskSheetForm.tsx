@@ -6,6 +6,7 @@ import type { AssessmentDetail } from '@engine/models/api.types';
 import {
   TASK_DOMAINS,
   TASK_EXECUTORS,
+  isPricedExecutor,
   TASK_PHASES,
   TASK_PRIORITIES,
   TASK_STATUSES,
@@ -125,6 +126,7 @@ export function TaskSheetForm({ open, onOpenChange, task, assessment, staff }: T
     setForm(task ? fromTask(task) : blank(staff, 'phase_1_urgent'));
     setError(null);
     setConfirmDelete(false);
+    setConfirmDiscard(false);
     // task é lido no momento da abertura, de propósito fora das dependências.
   }, [open, taskId, staff]);
 
@@ -139,12 +141,28 @@ export function TaskSheetForm({ open, onOpenChange, task, assessment, staff }: T
   const requiredBy = task ? requiredByOf(task, assessment.snapshot) : null;
 
   const close = () => onOpenChange(false);
+  // Entregável da proposta: P4S ou parceiro, incluído. Tem prazo e, em regra, honorários.
+  const proposalDeliverable = isPricedExecutor(form.executorType) && form.includedInProposal;
+  const dirty = task ? Object.keys(diff(fromTask(task), form)).length > 0 : form.title.trim() !== '' || form.description.trim() !== '';
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  /** Fechar com Esc ou clicando fora não deita fora o que foi escrito sem perguntar. */
+  const requestClose = (next: boolean) => {
+    if (next || pending) return;
+    if (dirty && !confirmDiscard) setConfirmDiscard(true);
+    else close();
+  };
+  // O âmbito da ferramenta são os quatro domínios da proposta. «Economia circular» só aparece numa tarefa que já o tenha.
+  const domainOptions = TASK_DOMAINS.filter((domain) => domain !== 'circular_economy' || form.domain === 'circular_economy');
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     setError(null);
     if (form.title.trim().length < 3) {
       setError('O título tem de ter pelo menos 3 caracteres.');
+      return;
+    }
+    if (proposalDeliverable && !form.deadline && !followUpOnly) {
+      setError('Indique o prazo. Um entregável da P4S ou do parceiro incluído na proposta tem prazo fechado.');
       return;
     }
     if (task) {
@@ -178,7 +196,7 @@ export function TaskSheetForm({ open, onOpenChange, task, assessment, staff }: T
   };
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={requestClose}>
       <SheetContent aria-describedby="task-sheet-description">
         <form className="flex h-full flex-col" onSubmit={submit} noValidate>
           <SheetHeader>
@@ -192,12 +210,25 @@ export function TaskSheetForm({ open, onOpenChange, task, assessment, staff }: T
                     : 'Tarefa acrescentada pela P4S ao plano.'
                 : staff
                   ? 'Entregável extra para a proposta ou tarefa interna da fábrica.'
-                  : 'Tarefa interna da fábrica. Entregáveis P4S são acrescentados pela equipa P4S.'}
+                  : 'Tarefa interna da fábrica. Depois de criada, só a equipa P4S a pode eliminar.'}
             </SheetDescription>
           </SheetHeader>
 
           <SheetBody>
             {error && <ErrorBanner title="Não foi possível guardar." message={error} />}
+            {confirmDiscard && (
+              <div role="alertdialog" aria-label="Alterações por guardar" className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 text-amber-950">
+                <p className="text-sm font-medium">Tem alterações por guardar.</p>
+                <div className="mt-2 flex gap-2">
+                  <Button size="sm" variant="outline" onClick={() => setConfirmDiscard(false)}>
+                    Continuar a editar
+                  </Button>
+                  <Button size="sm" variant="danger" onClick={close}>
+                    Descartar alterações
+                  </Button>
+                </div>
+              </div>
+            )}
             {followUpOnly && (
               <p className="flex items-start gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
                 <Lock aria-hidden className="mt-0.5 size-3.5 shrink-0" />
@@ -271,7 +302,7 @@ export function TaskSheetForm({ open, onOpenChange, task, assessment, staff }: T
                 )}
               </legend>
               <div className="grid grid-cols-2 gap-3">
-                <Field label="Honorários fixos" htmlFor="task-cost">
+                <Field label={form.executorType === 'internal' ? 'Custo interno estimado' : 'Honorários fixos'} htmlFor="task-cost">
                   <EuroInput
                     id="task-cost"
                     value={form.estimatedCost}
@@ -313,6 +344,11 @@ export function TaskSheetForm({ open, onOpenChange, task, assessment, staff }: T
                 />
               </label>
               <FieldHint>Tarefas internas e fora da proposta não contam para o investimento.</FieldHint>
+              {proposalDeliverable && form.estimatedCost === 0 && !followUpOnly && (
+                <FieldHint className="font-medium text-amber-800">
+                  Sem honorários, este entregável sai na proposta a 0 €.
+                </FieldHint>
+              )}
             </fieldset>
 
             <div className="grid grid-cols-2 gap-3">
@@ -323,7 +359,7 @@ export function TaskSheetForm({ open, onOpenChange, task, assessment, staff }: T
                   disabled={followUpOnly}
                   onChange={(e) => set('domain', e.target.value as TaskDomain)}
                 >
-                  {TASK_DOMAINS.map((d) => (
+                  {domainOptions.map((d) => (
                     <option key={d} value={d}>
                       {DOMAIN_LABELS[d]}
                     </option>

@@ -22,7 +22,7 @@ import {
   phaseWindowText,
 } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
-import { PriorityBadge, pricedExecutorFor } from './TaskBadges';
+import { ExecutorBadge, PriorityBadge, pricedExecutorFor } from './TaskBadges';
 import { canEditProposalTerms, isAfterPhaseWindow, isOverdue, phaseEndDate, requiredByOf } from './task-rules';
 
 const PHASES: TaskPhase[] = ['phase_1_urgent', 'phase_2_structural'];
@@ -50,11 +50,25 @@ interface ProposalConfiguratorProps {
   today: string;
   /** Diagnóstico a que o plano pertence: dá o remetente de cada entregável e a data de emissão da proposta. */
   assessment: AssessmentDetail;
+  /** Há filtros ativos: uma fase vazia pode ser efeito deles. */
+  filtered: boolean;
+  /** Nome do responsável de cada tarefa, por id de utilizador. */
+  assigneeNames: ReadonlyMap<string, string>;
   onPatch: (task: Task, patch: UpdateTaskInput) => void;
   onOpen: (task: Task) => void;
 }
 
-export function ProposalConfigurator({ tasks, allTasks, staff, today, assessment, onPatch, onOpen }: ProposalConfiguratorProps) {
+export function ProposalConfigurator({
+  tasks,
+  allTasks,
+  staff,
+  today,
+  assessment,
+  filtered,
+  assigneeNames,
+  onPatch,
+  onOpen,
+}: ProposalConfiguratorProps) {
   const summary = summarizeRemediation(allTasks, 0);
   // As janelas das fases contam a partir da data de emissão da proposta.
   const baseDate = assessment.proposal.issuedOn;
@@ -79,13 +93,15 @@ export function ProposalConfigurator({ tasks, allTasks, staff, today, assessment
               </p>
             </div>
             {rows.length === 0 ? (
-              <p className="border-t border-slate-200 px-3 py-3 text-xs text-slate-600">Sem tarefas nesta fase com os filtros atuais.</p>
+              <p className="border-t border-slate-200 px-3 py-3 text-xs text-slate-600">
+                {filtered ? 'Sem tarefas nesta fase com os filtros atuais.' : 'Sem tarefas nesta fase.'}
+              </p>
             ) : (
               <Table className="min-w-[920px] table-fixed">
                 {COLUMNS}
                 <TableHeader className="bg-white">
                   <TableRow>
-                    <TableHead>Incluir</TableHead>
+                    <TableHead>{staff ? 'Incluir' : 'Proposta'}</TableHead>
                     <TableHead>Entregável</TableHead>
                     <TableHead>Prioridade</TableHead>
                     <TableHead>Executor</TableHead>
@@ -106,6 +122,7 @@ export function ProposalConfigurator({ tasks, allTasks, staff, today, assessment
                       today={today}
                       baseDate={baseDate}
                       requiredBy={requiredByOf(task, assessment.snapshot)}
+                      assignee={task.assignedUserId ? (assigneeNames.get(task.assignedUserId) ?? null) : null}
                       onPatch={onPatch}
                       onOpen={onOpen}
                     />
@@ -137,6 +154,7 @@ function ConfiguratorRow({
   today,
   baseDate,
   requiredBy,
+  assignee,
   onPatch,
   onOpen,
 }: {
@@ -145,6 +163,7 @@ function ConfiguratorRow({
   today: string;
   baseDate: string;
   requiredBy: string | null;
+  assignee: string | null;
   onPatch: (task: Task, patch: UpdateTaskInput) => void;
   onOpen: (task: Task) => void;
 }) {
@@ -158,13 +177,18 @@ function ConfiguratorRow({
   return (
     <TableRow className={cn('transition-colors hover:bg-slate-50', !task.includedInProposal && 'bg-slate-50/70')}>
       <TableCell>
-        <Switch
-          checked={task.includedInProposal}
-          disabled={!editable}
-          title={lockedTitle}
-          aria-label={`Incluir «${task.title}» na proposta`}
-          onCheckedChange={(includedInProposal) => onPatch(task, { includedInProposal })}
-        />
+        {staff ? (
+          <Switch
+            checked={task.includedInProposal}
+            disabled={!editable}
+            title={lockedTitle}
+            aria-label={`Incluir «${task.title}» na proposta`}
+            onCheckedChange={(includedInProposal) => onPatch(task, { includedInProposal })}
+          />
+        ) : (
+          // Para a empresa isto não é uma escolha: diz-se o que é, em vez de mostrar um controlo bloqueado.
+          <span className="text-xs text-slate-700">{counts ? 'Incluído' : task.executorType === 'internal' ? 'Interno' : 'Fora'}</span>
+        )}
       </TableCell>
       <TableCell>
         <button
@@ -181,13 +205,17 @@ function ConfiguratorRow({
           {DOMAIN_LABELS[task.domain]}
           {requiredBy ? ` · exigido por ${requiredBy}` : ''}
           {!task.includedInProposal ? ' · fora da proposta' : ''}
+          {assignee ? ` · responsável: ${assignee}` : ''}
         </p>
       </TableCell>
       <TableCell>
         <PriorityBadge priority={task.priority} />
       </TableCell>
       <TableCell>
-        <div className="flex items-center gap-1.5" title={staff ? undefined : 'Executor definido pela P4S'}>
+        {!staff ? (
+          <ExecutorBadge executor={task.executorType} />
+        ) : (
+        <div className="flex items-center gap-1.5">
           <Segmented
             size="sm"
             label={`Executor de «${task.title}»`}
@@ -201,6 +229,7 @@ function ConfiguratorRow({
           />
           {!editable && <Lock aria-label="Termos definidos pela P4S" className="size-3.5 text-slate-600" />}
         </div>
+        )}
       </TableCell>
       <TableCell numeric className={cn('text-xs', overdue ? 'font-semibold text-rose-700' : 'text-slate-900')}>
         {formatDatePt(task.deadline)}

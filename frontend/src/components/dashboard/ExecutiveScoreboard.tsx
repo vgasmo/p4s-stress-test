@@ -9,6 +9,7 @@
 import type { ReactNode } from 'react';
 import type { AssessmentDetail } from '@engine/models/api.types';
 import type { Task } from '@engine/models/domain';
+import { gapLines, openCriticalGaps } from '@engine/services/plan-coverage';
 import { countsTowardsProposal, summarizeRemediation } from '@engine/services/remediation-summary';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -16,8 +17,8 @@ import {
   exactValueTitle,
   formatApproxEUR,
   formatApproxPerYear,
+  formatBasisPoints,
   formatEUR,
-  formatNumberPt,
   formatPercent,
   formatShareOfRisk,
 } from '@/lib/formatters';
@@ -36,8 +37,10 @@ const plural = (count: number, one: string, many: string) => (count === 1 ? one 
 export function ExecutiveScoreboard({ assessment, tasks }: ExecutiveScoreboardProps) {
   const summary = summarizeRemediation(tasks, assessment.commercialRevenueAtRisk);
   const phase1Count = tasks.filter((task) => countsTowardsProposal(task) && task.phase === 'phase_1_urgent').length;
-  const openCritical = tasks.filter((task) => task.priority === 'critical' && task.status !== 'completed').length;
   const { snapshot } = assessment;
+  // Conta lacunas do diagnóstico ainda por resolver, não tarefas: eliminar um entregável
+  // ou baixar-lhe a prioridade não faz desaparecer a lacuna.
+  const openCritical = openCriticalGaps(gapLines(snapshot, tasks));
   const spread = assessment.estimatedSpreadPenalty;
 
   return (
@@ -49,13 +52,17 @@ export function ExecutiveScoreboard({ assessment, tasks }: ExecutiveScoreboardPr
         valueClass={assessment.commercialRevenueAtRisk > 0 ? 'text-rose-700' : 'text-slate-900'}
         testId="kpi-commercial-risk"
         badge={
-          snapshot.dealbreaker ? (
-            <Badge tone="critical">Piso setorial {formatNumberPt(snapshot.dealbreaker.floorPoints / 100, 2)}</Badge>
+          // Só quando o bloqueio mudou o resultado: de outra forma são dois números lado a lado sem relação.
+          snapshot.dealbreaker?.raisedWeight ? (
+            <Badge tone="critical" title={snapshot.dealbreaker.reason}>
+              Bloqueio setorial: mínimo de {snapshot.dealbreaker.floorPoints}% da base
+            </Badge>
           ) : null
         }
       >
         <Num>{formatPercent(Math.round(snapshot.commercialRevenueAtRiskShare))}</Num> da faturação · score{' '}
-        <Num>{assessment.riskScore}</Num>/100
+        <Num>{assessment.riskScore}</Num>/100 · base <Num>{formatEUR(Math.round(snapshot.exposedClientRevenue))}</Num> nos 3
+        maiores clientes
       </Cell>
 
       <Cell
@@ -68,7 +75,7 @@ export function ExecutiveScoreboard({ assessment, tasks }: ExecutiveScoreboardPr
         {assessment.creditLineToRefinance > 0 ? (
           spread > 0 ? (
             <>
-              {snapshot.spreadPenaltyBps ? `${snapshot.spreadPenaltyBps} bps sobre ` : 'Sobre '}
+              {snapshot.spreadPenaltyBps ? `${formatBasisPoints(snapshot.spreadPenaltyBps)} ao ano sobre ` : 'Sobre '}
               <Num>{formatEUR(assessment.creditLineToRefinance)}</Num> a refinanciar
             </>
           ) : (
@@ -85,7 +92,7 @@ export function ExecutiveScoreboard({ assessment, tasks }: ExecutiveScoreboardPr
         testId="kpi-phase1"
         badge={
           summary.phase1CostShareOfRisk !== null && summary.phase1Cost > 0 ? (
-            <Badge tone="p4s">Custo equivale a {formatShareOfRisk(summary.phase1CostShareOfRisk)} da faturação em risco</Badge>
+            <Badge tone="p4s">Custo equivale a {formatShareOfRisk(summary.phase1CostShareOfRisk, true)} da faturação em risco</Badge>
           ) : null
         }
       >
@@ -98,7 +105,7 @@ export function ExecutiveScoreboard({ assessment, tasks }: ExecutiveScoreboardPr
         {summary.totalCostShareOfRisk !== null && summary.totalInvestment > 0 && (
           <>
             {' '}
-            · <Num>{formatShareOfRisk(summary.totalCostShareOfRisk)}</Num> da faturação em risco
+            · <Num>{formatShareOfRisk(summary.totalCostShareOfRisk, true)}</Num> da faturação em risco
           </>
         )}
       </Cell>

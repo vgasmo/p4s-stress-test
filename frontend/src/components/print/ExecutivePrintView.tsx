@@ -4,15 +4,16 @@
 import { createPortal } from 'react-dom';
 import type { AssessmentDetail } from '@engine/models/api.types';
 import type { Task, TaskPhase } from '@engine/models/domain';
+import { gapLines, type GapLine } from '@engine/services/plan-coverage';
 import { countsTowardsProposal, summarizeRemediation } from '@engine/services/remediation-summary';
 import { FOOTER_SIGNATURE, Wordmark } from '@/components/layout/AppShell';
 import {
   EXECUTOR_SHORT_LABELS,
   formatApproxEUR,
   formatApproxPerYear,
+  formatBasisPoints,
   formatDatePt,
   formatEUR,
-  formatNumberPt,
   formatPercent,
   formatShareOfRisk,
   phaseLabel,
@@ -26,7 +27,9 @@ export function ExecutivePrintView({ assessment, tasks }: { assessment: Assessme
   const { company, snapshot } = assessment;
   const summary = summarizeRemediation(tasks, assessment.commercialRevenueAtRisk);
   const included = tasks.filter((task) => task.includedInProposal);
-  const gaps = snapshot.requirements.filter((r) => r.status === 'gap');
+  // Cada lacuna com o que o plano lhe responde hoje, para o resumo dizer o mesmo que o configurador.
+  const gaps = gapLines(snapshot, tasks);
+  const hasProposal = tasks.some(countsTowardsProposal);
   // Datas guardadas no servidor: imprimir mais tarde não muda a data de emissão nem a validade.
   const { issuedOn, validUntil, validityDays, expired } = assessment.proposal;
 
@@ -51,6 +54,20 @@ export function ExecutivePrintView({ assessment, tasks }: { assessment: Assessme
           <Meta label="Setor" value={sectorLabel(assessment.sectorProfile)} />
           <Meta label="Data do diagnóstico" value={formatDatePt(snapshot.baseDate)} mono />
         </dl>
+        {/* Os dados de partida do cálculo: sem eles, quem não esteve na reunião não consegue conferir o número. */}
+        <dl
+          data-testid="print-inputs"
+          className="mt-1.5 grid grid-cols-[minmax(0,2.2fr)_minmax(0,1fr)_minmax(0,1.8fr)_minmax(0,1fr)] gap-x-4 border-b border-slate-300 pb-2"
+        >
+          <Meta label="Faturação anual" value={formatEUR(snapshot.input.annualRevenue)} mono />
+          <Meta label="Nos 3 maiores clientes" value={formatPercent(snapshot.input.topClientsShare)} mono />
+          <Meta label="Base exposta (faturação nesses clientes)" value={formatEUR(Math.round(snapshot.exposedClientRevenue))} mono />
+          <Meta
+            label="Crédito a refinanciar"
+            value={assessment.creditLineToRefinance > 0 ? formatEUR(assessment.creditLineToRefinance) : 'Sem'}
+            mono
+          />
+        </dl>
 
         <section className="mt-3 grid grid-cols-3 gap-2.5 print-avoid-break">
           <Kpi label="Faturação comercial em risco" value={formatApproxEUR(assessment.commercialRevenueAtRisk)} accent="text-rose-700">
@@ -58,7 +75,7 @@ export function ExecutivePrintView({ assessment, tasks }: { assessment: Assessme
           </Kpi>
           <Kpi label="Sobrecusto bancário anual" value={formatApproxPerYear(assessment.estimatedSpreadPenalty)} accent="text-amber-800">
             {assessment.estimatedSpreadPenalty > 0
-              ? `${snapshot.spreadPenaltyBps ? `${snapshot.spreadPenaltyBps} pontos base sobre ` : 'Sobre '}${formatEUR(assessment.creditLineToRefinance)} a refinanciar`
+              ? `${snapshot.spreadPenaltyBps ? `${formatBasisPoints(snapshot.spreadPenaltyBps)} ao ano sobre ` : 'Sobre '}${formatEUR(assessment.creditLineToRefinance)} a refinanciar`
               : assessment.creditLineToRefinance > 0
                 ? 'Rácios ESG disponíveis para o refinanciamento'
                 : 'Sem refinanciamento nos próximos 18 meses'}
@@ -66,15 +83,17 @@ export function ExecutivePrintView({ assessment, tasks }: { assessment: Assessme
           <Kpi label="Investimento de remediação" value={formatEUR(summary.totalInvestment)}>
             Fase 1 {formatEUR(summary.phase1Cost)} · Fase 2 {formatEUR(summary.phase2Cost)}
             {summary.phase1CostShareOfRisk !== null && summary.phase1Cost > 0
-              ? ` · a Fase 1 equivale a ${formatShareOfRisk(summary.phase1CostShareOfRisk)} da faturação em risco`
+              ? ` · a Fase 1 equivale a ${formatShareOfRisk(summary.phase1CostShareOfRisk, true)} da faturação em risco`
               : ''}
           </Kpi>
         </section>
 
         {snapshot.dealbreaker && (
           <p className="mt-2 border-l-2 border-rose-700 pl-2 text-[9px] text-slate-800">
-            <span className="font-semibold">Bloqueio setorial (peso mínimo {formatNumberPt(snapshot.dealbreaker.floorPoints / 100, 2)}).</span>{' '}
-            {snapshot.dealbreaker.reason}
+            <span className="font-semibold">Bloqueio setorial.</span> {snapshot.dealbreaker.reason}
+            {snapshot.dealbreaker.raisedWeight
+              ? ` Por isso considera-se em risco pelo menos ${snapshot.dealbreaker.floorPoints}% da base exposta.`
+              : ''}
           </p>
         )}
 
@@ -88,17 +107,19 @@ export function ExecutivePrintView({ assessment, tasks }: { assessment: Assessme
                 <tr className="border-b border-slate-400 text-left text-[8.5px] uppercase tracking-wide text-slate-700">
                   <th className="py-1 pr-2 font-medium">Requisito</th>
                   <th className="py-1 pr-2 font-medium">Quem exige</th>
-                  <th className="py-1 pr-2 font-medium">Solução</th>
+                  <th className="py-1 pr-2 font-medium">Resposta no plano</th>
                   <th className="py-1 text-right font-medium">Fase</th>
                 </tr>
               </thead>
               <tbody>
                 {gaps.map((gap) => (
-                  <tr key={gap.code} className="border-b border-slate-200">
-                    <td className="py-1.5 pr-2 font-medium">{gap.label}</td>
-                    <td className="py-1.5 pr-2">{gap.requiredByLabel}</td>
-                    <td className="py-1.5 pr-2">{gap.solution.title}</td>
-                    <td className="py-1.5 text-right font-mono tabular-nums">{gap.solution.phase === 'phase_1_urgent' ? '1' : '2'}</td>
+                  <tr key={gap.requirement.code} className="border-b border-slate-200">
+                    <td className="py-1.5 pr-2 font-medium">{gap.requirement.label}</td>
+                    <td className="py-1.5 pr-2">{gap.requirement.requiredByLabel}</td>
+                    <td className="py-1.5 pr-2">{gapAnswer(gap)}</td>
+                    <td className="py-1.5 text-right font-mono tabular-nums">
+                      {gap.coverage === 'proposal' || gap.coverage === 'internal' ? (gap.phase === 'phase_1_urgent' ? '1' : '2') : '—'}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -167,11 +188,20 @@ export function ExecutivePrintView({ assessment, tasks }: { assessment: Assessme
           {assessment.estimatedSpreadPenalty > 0 && snapshot.spreadPenaltyBps
             ? ` e sobre o agravamento de spread sem rácios ESG (${snapshot.spreadPenaltyBps} pontos base por ano)`
             : ''}
-          . Não são previsões nem medições desta empresa. Os honorários são fixos.
+          . Não são previsões nem medições desta empresa. O score (0 a 100) é a parte da base exposta considerada em
+          risco. Os honorários são fixos.
         </p>
 
         <footer className="mt-4 border border-slate-400 p-3 print-avoid-break">
-          {expired ? (
+          {!hasProposal ? (
+            // Sem entregáveis da P4S ou do parceiro não há nada para aceitar: o documento regista o diagnóstico.
+            <p className="text-[11px] font-semibold" data-testid="proposal-validity">
+              Sem entregáveis propostos
+              <span className="block pt-0.5 text-[9px] font-normal text-slate-700">
+                Este documento regista o diagnóstico de {formatDatePt(snapshot.baseDate)}. Não é uma proposta de honorários.
+              </span>
+            </p>
+          ) : expired ? (
             <p className="text-[11px] font-semibold" data-testid="proposal-validity">
               Proposta expirada em <span className="font-mono tabular-nums">{formatDatePt(validUntil)}</span>
               <span className="block pt-0.5 text-[9px] font-normal text-slate-700">
@@ -203,6 +233,15 @@ export function ExecutivePrintView({ assessment, tasks }: { assessment: Assessme
     </div>,
     document.body,
   );
+}
+
+/** O que o plano responde hoje a uma lacuna, dito numa linha. */
+function gapAnswer(gap: GapLine): string {
+  const done = gap.resolved ? ' · concluído' : '';
+  if (!gap.task) return 'Sem entregável no plano';
+  if (gap.coverage === 'excluded') return 'Fora desta proposta';
+  if (gap.coverage === 'internal') return `${gap.task.title} (a cargo da empresa)${done}`;
+  return `${gap.task.title}${done}`;
 }
 
 function Meta({ label, value, mono }: { label: string; value: string; mono?: boolean }) {

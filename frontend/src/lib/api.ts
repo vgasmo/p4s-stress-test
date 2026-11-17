@@ -20,7 +20,7 @@ import type {
   UpdateCompanyInput,
   UpdateTaskInput,
 } from '@engine/models/schemas';
-import type { Catalog } from '@engine/services/requirements';
+import type { Catalog, RequirementCode } from '@engine/services/requirements';
 import { sessionStore } from './session';
 
 const BASE = '/api/v1';
@@ -196,6 +196,9 @@ export const api = {
   /** A proposta passa a contar como emitida hoje (equipa P4S). */
   reissueProposal: (id: string) => request<AssessmentDetail>('POST', `/assessments/${seg(id)}/reissue-proposal`),
   deleteAssessment: (id: string) => request<void>('DELETE', `/assessments/${seg(id)}`),
+  /** Repõe o entregável-tipo de uma lacuna que ficou sem resposta no plano (equipa P4S). */
+  restoreDeliverable: (assessmentId: string, code: RequirementCode) =>
+    request<Task>('POST', `/assessments/${seg(assessmentId)}/deliverables/${seg(code)}/restore`),
 
   listTasks: (assessmentId: string) => request<Task[]>('GET', `/tasks?assessment_id=${seg(assessmentId)}`),
   createTask: (payload: CreateTaskPayload) => request<Task>('POST', '/tasks', payload),

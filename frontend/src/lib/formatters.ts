@@ -103,11 +103,18 @@ export const formatEuroRange = (low: number, high: number) =>
 /** Valor calculado, para quem quer ver o número por trás da ordem de grandeza. */
 export const exactValueTitle = (value: number, suffix = '') => `Valor calculado: ${formatEUR(value)}${suffix}`;
 
+/** Pontos base → percentagem ao ano, como um diretor financeiro a diz: 40 → «0,40%». */
+export const formatBasisPoints = (bps: number) => `${formatNumberPt(bps / 100, 2)}%`;
+
 /** Pontos de peso → «+0,45». */
 export const formatWeight = (points: number) => `+${formatNumberPt(points / 100, 2)}`;
 
-export function formatShareOfRisk(percent: number): string {
-  if (percent > 0 && percent < 0.1) return '<0,1%';
+/**
+ * Custo em percentagem da faturação em risco. `nonZero` diz que o custo existe: a percentagem
+ * chega arredondada, e um custo pequeno face a um risco grande não pode aparecer como «0,0%».
+ */
+export function formatShareOfRisk(percent: number, nonZero = percent > 0): string {
+  if (nonZero && percent < 0.1) return '<0,1%';
   return formatPercent(percent, 1);
 }
 

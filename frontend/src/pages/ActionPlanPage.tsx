@@ -5,6 +5,7 @@ import type { AssessmentDetail, AssessmentListEntry } from '@engine/models/api.t
 import { CompanySheet } from '@/components/company/CompanySheet';
 import { ExecutiveScoreboard, ExecutiveScoreboardSkeleton } from '@/components/dashboard/ExecutiveScoreboard';
 import { GapMatrix, GapMatrixSkeleton } from '@/components/dashboard/GapMatrix';
+import { PlanProgress } from '@/components/dashboard/PlanProgress';
 import { ExecutivePrintView } from '@/components/print/ExecutivePrintView';
 import { TaskManagementBoard } from '@/components/tasks/TaskManagementBoard';
 import { Badge } from '@/components/ui/badge';
@@ -15,7 +16,7 @@ import { EmptyState, ErrorBanner } from '@/components/ui/states';
 import { useAssessment, useAssessments, useDeleteAssessment, useReissueProposal } from '@/hooks/useAssessment';
 import { useTasks } from '@/hooks/useTasks';
 import { ApiError, errorMessage } from '@/lib/api';
-import { formatDatePt, formatEUR, sectorLabel } from '@/lib/formatters';
+import { formatDatePt, formatDateTimePt, formatEUR, formatPercent, sectorLabel, todayInLisbon } from '@/lib/formatters';
 import { isStaffSession, useSession } from '@/lib/session';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -168,7 +169,8 @@ function ActionPlan({ assessmentId, staff }: { assessmentId: string; staff: bool
       <ExistingCompanyNotice detail={detail} />
       <ProposalValidity detail={detail} staff={staff} />
       <ExecutiveScoreboard assessment={detail} tasks={currentTasks} />
-      <GapMatrix assessment={detail} />
+      <PlanProgress tasks={currentTasks} today={todayInLisbon()} />
+      <GapMatrix assessment={detail} tasks={currentTasks} staff={staff} />
       <TaskManagementBoard assessment={detail} tasksQuery={tasks} />
       <ExecutivePrintView assessment={detail} tasks={currentTasks} />
     </div>
@@ -210,6 +212,7 @@ function PlanHeader({ detail, history, staff }: { detail: AssessmentDetail; hist
           <Badge tone="outline">{sectorLabel(detail.sectorProfile)}</Badge>
           <span>
             Diagnóstico de <span className="font-mono tabular-nums text-slate-900">{formatDatePt(detail.snapshot.baseDate)}</span>
+            {detail.conductedByName ? `, por ${detail.conductedByName}` : ''}
           </span>
           {!proposal.expired && (
             <span data-testid="proposal-dates">
@@ -217,6 +220,20 @@ function PlanHeader({ detail, history, staff }: { detail: AssessmentDetail; hist
             </span>
           )}
         </div>
+        {/* Os dados de partida do cálculo, para se poder conferir o número e repetir o diagnóstico. */}
+        <p className="mt-1 text-xs text-slate-600" data-testid="plan-inputs">
+          Calculado com faturação anual de{' '}
+          <span className="font-mono tabular-nums text-slate-900">{formatEUR(detail.snapshot.input.annualRevenue)}</span>, dos quais{' '}
+          <span className="font-mono tabular-nums text-slate-900">{formatPercent(detail.snapshot.input.topClientsShare)}</span> nos 3
+          maiores clientes
+          {detail.creditLineToRefinance > 0 && (
+            <>
+              , e <span className="font-mono tabular-nums text-slate-900">{formatEUR(detail.creditLineToRefinance)}</span> de crédito a
+              refinanciar
+            </>
+          )}
+          .
+        </p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         {history.length > 1 && (
@@ -229,9 +246,11 @@ function PlanHeader({ detail, history, staff }: { detail: AssessmentDetail; hist
           >
             {history.map((entry) => (
               <option key={entry.id} value={entry.id} disabled={!entry.openable}>
-                {formatDatePt(entry.createdAt.slice(0, 10))}
+                {formatDateTimePt(entry.createdAt)}
                 {entry.openable
-                  ? ` · score ${entry.riskScore} · ${formatEUR(entry.commercialRevenueAtRisk)}`
+                  ? ` · ${formatEUR(entry.commercialRevenueAtRisk)} em risco · ${entry.taskCount} ${entry.taskCount === 1 ? 'tarefa' : 'tarefas'}${
+                      entry.conductedByName ? ` · ${entry.conductedByName}` : ''
+                    }`
                   : ' · versão anterior, não abre'}
               </option>
             ))}

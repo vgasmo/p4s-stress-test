@@ -232,6 +232,10 @@ await tisaxExecutor.getByRole('radio', { name: 'Interno' }).click();
 await quickly('fase 1 sem banca nem TISAX', 'kpi-phase1', eur('0'));
 await expectText('total', 'kpi-total', eur('3.800'));
 await settle();
+// A matriz de conformidade diz o mesmo que o configurador, e não a solução-tipo do diagnóstico.
+const gapRow = (code) => page.getByTestId(`gap-${code}`).innerText();
+expectEq('matriz: entregável desligado aparece fora da proposta', /Fora da proposta/.test(await gapRow('banking_esg')), true);
+expectEq('matriz: entregável passado a interno', /Interno/.test(await gapRow('information_security')) && !/4\.500/.test(await gapRow('information_security')), true);
 await page.unroute('**/api/v1/tasks/*', slowPut);
 await page.reload();
 await page.getByTestId('kpi-total').waitFor();
@@ -261,6 +265,7 @@ await page.getByLabel('Honorários fixos').fill('3600');
 await page.getByRole('button', { name: 'Guardar alterações' }).click();
 await page.getByRole('dialog').waitFor({ state: 'detached' });
 await expectText('total com Âmbito 3 a 3.600', 'kpi-total', eur('9.900'));
+expectEq('matriz: honorários renegociados', (await page.getByTestId('gap-carbon_scope_3').innerText()).includes(eur('3.600')), true);
 await page.getByRole('button', { name: /Editar «Auditoria de Emissões/ }).click();
 await page.getByLabel('Honorários fixos').fill('3800');
 await page.getByRole('button', { name: 'Guardar alterações' }).click();
@@ -271,6 +276,10 @@ await page.getByRole('button', { name: 'Nova tarefa' }).click();
 await page.getByLabel('Título').fill('Formação da equipa de compras (teste)');
 await page.getByLabel('Honorários fixos').fill('900');
 await page.getByRole('button', { name: 'Criar tarefa' }).click();
+// Um entregável da P4S incluído na proposta tem prazo fechado: sem prazo não se cria.
+await page.getByRole('dialog').getByText('Indique o prazo.').waitFor();
+await page.getByRole('dialog').getByLabel('Prazo', { exact: true }).fill('2027-01-15');
+await page.getByRole('button', { name: 'Criar tarefa' }).click();
 await page.getByRole('dialog').waitFor({ state: 'detached' });
 await expectText('tarefa extra criada', 'kpi-total', eur('11.000'));
 await page.getByRole('button', { name: /Editar «Formação da equipa/ }).click();
@@ -278,6 +287,30 @@ await page.getByRole('button', { name: 'Eliminar', exact: true }).click();
 await page.getByRole('button', { name: 'Confirmar eliminação' }).click();
 await page.getByRole('dialog').waitFor({ state: 'detached' });
 await expectText('tarefa extra eliminada', 'kpi-total', eur('10.100'));
+
+// Fechar o painel com alterações por guardar pede confirmação, em vez de as perder em silêncio.
+await page.getByRole('button', { name: /Editar «Auditoria de Emissões/ }).click();
+await page.getByRole('dialog').getByLabel('Honorários fixos').fill('1234');
+await page.keyboard.press('Escape');
+await page.getByText('Tem alterações por guardar.').waitFor();
+await page.getByRole('button', { name: 'Descartar alterações' }).click();
+await page.getByRole('dialog').waitFor({ state: 'detached' });
+await expectText('alteração descartada não chega ao total', 'kpi-total', eur('10.100'));
+
+// Eliminar um entregável do diagnóstico não esconde a lacuna, e a P4S consegue repô-lo.
+const criticalText = () => page.getByTestId('kpi-phase1').locator('xpath=..').innerText();
+expectEq('lacunas críticas antes de eliminar', /1 lacuna crítica em aberto/.test(await criticalText()), true);
+await page.getByRole('button', { name: /Editar «Auditoria de Segurança/ }).click();
+await page.getByRole('button', { name: 'Eliminar', exact: true }).click();
+await page.getByRole('button', { name: 'Confirmar eliminação' }).click();
+await page.getByRole('dialog').waitFor({ state: 'detached' });
+await expectText('entregável eliminado', 'kpi-total', eur('5.600'));
+expectEq('matriz: lacuna sem entregável no plano', /Sem entregável no plano/.test(await page.getByTestId('gap-information_security').innerText()), true);
+expectEq('a lacuna crítica continua em aberto', /1 lacuna crítica em aberto/.test(await criticalText()), true);
+await page.getByTestId('gap-information_security').getByRole('button', { name: 'Repor' }).click();
+await expectText('entregável reposto com os termos do diagnóstico', 'kpi-total', eur('10.100'));
+await settle();
+expectEq('andamento do plano à vista', /0 de 3 tarefas concluídas/.test(await page.getByTestId('plan-progress').innerText()), true);
 
 // ── 8. Filtros e kanban ─────────────────────────────────────────────────────────────
 await page.getByLabel('Executor', { exact: true }).selectOption('partner');
@@ -311,6 +344,8 @@ const validUntil = (await page.getByTestId('proposal-dates').textContent()).matc
 expectEq('resumo: validade igual à do plano', (await page.getByTestId('proposal-validity').innerText()).includes(`válida por 30 dias (até ${validUntil})`), true);
 expectEq('resumo: diz de quando contam os prazos', printed.includes('Prazos calculados para adjudicação na data de emissão'), true);
 expectEq('resumo: remetente lido do requisito, não da descrição', /Exigido por:/.test(printed), false);
+expectEq('resumo: dados de partida do cálculo', /6\.500\.000\s€/.test(await page.getByTestId('print-inputs').innerText()) && /58%/.test(await page.getByTestId('print-inputs').innerText()), true);
+expectEq('resumo: lacunas com a resposta atual do plano', /resposta no plano/i.test(printed), true);
 const pdf = await page.pdf({ format: 'A4', printBackground: true, preferCSSPageSize: true });
 expectEq('páginas do PDF', (pdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) ?? []).length, 1);
 writeFileSync(`${OUT}/resumo-executivo.pdf`, pdf);
@@ -423,9 +458,11 @@ await logout();
 await page.goto(BASE + '/entrar?next=/plano');
 await loginAs(COMPANY_EMAIL, COMPANY_PASSWORD);
 await page.waitForURL(/\/plano\/[0-9a-f-]{36}$/);
-await page.getByRole('switch', { name: /Incluir «Dossier/ }).waitFor();
-expectEq('empresa: inclusão bloqueada', await page.getByRole('switch', { name: /Incluir «Dossier/ }).isDisabled(), true);
-expectEq('empresa: executor bloqueado', await tisaxExecutor.getByRole('radio', { name: 'Interno' }).isDisabled(), true);
+await page.getByTestId('kpi-total').waitFor();
+await page.getByText('Pode atualizar o estado e o responsável de cada tarefa').waitFor();
+// Para a empresa não há controlos bloqueados: o plano diz o que é, e o que ela pode fazer.
+expectEq('empresa: sem interruptores de inclusão', await page.getByRole('switch', { name: /Incluir «/ }).count(), 0);
+expectEq('empresa: sem seletor de executor', await page.getByRole('radiogroup', { name: /Executor de «/ }).count(), 0);
 expectEq('empresa: sem seletor de empresas', await page.getByLabel('Empresa cliente').count(), 0);
 expectEq('empresa: sem «Novo diagnóstico»', await page.getByRole('link', { name: 'Novo diagnóstico' }).count(), 0);
 expectEq('empresa: não elimina diagnósticos', await page.getByRole('button', { name: 'Eliminar este diagnóstico' }).count(), 0);

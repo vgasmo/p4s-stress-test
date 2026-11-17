@@ -1,16 +1,27 @@
-// Matriz de conformidade por fase: o que falta, quem exige e qual a solução.
-// Usa a fotografia gravada no diagnóstico (não recalcula com regras mais recentes).
-// No fim mostra as contas e os pressupostos por trás de cada número.
+// Matriz de conformidade por fase: o que faltava no diagnóstico, quem o exige e o que o
+// plano responde hoje a cada lacuna.
+//
+// As lacunas e os pesos vêm da fotografia do diagnóstico (não se recalcula com regras mais
+// recentes). A resposta vem das tarefas atuais: se o consultor renegociou honorários, passou
+// o entregável a interno, o tirou da proposta ou o eliminou, a matriz diz o mesmo que o
+// configurador. No fim mostra as contas e os pressupostos por trás de cada número.
 
-import { Check, Minus, X } from 'lucide-react';
+import { Check, Minus, RotateCcw, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { AssessmentDetail, RequirementSnapshot } from '@engine/models/api.types';
-import type { TaskPhase } from '@engine/models/domain';
+import type { Task, TaskPhase } from '@engine/models/domain';
+import { gapLines, type GapLine } from '@engine/services/plan-coverage';
+import { ExecutorBadge } from '@/components/tasks/TaskBadges';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ExecutorBadge } from '@/components/tasks/TaskBadges';
+import { useRestoreDeliverable } from '@/hooks/usePlan';
+import { errorMessage } from '@/lib/api';
 import {
+  formatBasisPoints,
+  formatDatePt,
   formatEUR,
   formatNumberPt,
   formatPercent,
@@ -22,9 +33,21 @@ import { cn } from '@/lib/utils';
 
 const PHASES: TaskPhase[] = ['phase_1_urgent', 'phase_2_structural'];
 
-export function GapMatrix({ assessment }: { assessment: AssessmentDetail }) {
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+
+interface GapMatrixProps {
+  assessment: AssessmentDetail;
+  /** Tarefas atuais do plano. */
+  tasks: Task[];
+  staff: boolean;
+}
+
+export function GapMatrix({ assessment, tasks, staff }: GapMatrixProps) {
   const { requirements } = assessment.snapshot;
-  const gaps = requirements.filter((r) => r.status === 'gap').length;
+  const lines = gapLines(assessment.snapshot, tasks);
+  const lineByCode = new Map(lines.map((line) => [line.requirement.code, line]));
+  const resolved = lines.filter((line) => line.resolved).length;
+  const restore = useRestoreDeliverable(assessment.id);
 
   return (
     <Card>
@@ -32,15 +55,25 @@ export function GapMatrix({ assessment }: { assessment: AssessmentDetail }) {
         <div>
           <CardTitle>Matriz de conformidade</CardTitle>
           <CardDescription>
-            {gaps === 0
+            {lines.length === 0
               ? 'Sem lacunas no âmbito avaliado.'
-              : `${gaps} ${gaps === 1 ? 'lacuna' : 'lacunas'} com remetente identificado, por horizonte de execução.`}
+              : `${plural(lines.length, 'lacuna', 'lacunas')} no diagnóstico de ${formatDatePt(assessment.snapshot.baseDate)}${
+                  resolved > 0 ? `, ${plural(resolved, 'já resolvida', 'já resolvidas')}` : ''
+                }. A resposta de cada uma acompanha o plano em baixo.`}
           </CardDescription>
         </div>
       </CardHeader>
+      {restore.isError && (
+        <p role="alert" className="border-b border-rose-200 bg-rose-50 px-4 py-2 text-xs font-medium text-rose-900">
+          O entregável não foi reposto. {errorMessage(restore.error)}
+        </p>
+      )}
       <div className="grid grid-cols-1 divide-y divide-slate-200 xl:grid-cols-2 xl:divide-x xl:divide-y-0">
         {PHASES.map((phase) => {
-          const rows = requirements.filter((r) => r.solution.phase === phase);
+          // Uma lacuna aparece na fase do entregável que hoje lhe responde.
+          const rows = requirements.filter(
+            (requirement) => (lineByCode.get(requirement.code)?.phase ?? requirement.solution.phase) === phase,
+          );
           return (
             <section key={phase} aria-label={phaseLabel(phase)}>
               <div className="flex items-baseline justify-between px-4 pb-1 pt-3">
@@ -48,55 +81,60 @@ export function GapMatrix({ assessment }: { assessment: AssessmentDetail }) {
                 <span className="font-mono text-2xs tabular-nums text-slate-600">{phaseWindowText(phase)}</span>
               </div>
               {rows.length === 0 ? (
-                <p className="px-4 pb-3 text-xs text-slate-600">Nenhum requisito neste horizonte para o setor avaliado.</p>
+                <p className="px-4 pb-3 text-xs text-slate-600">Nenhum requisito neste horizonte.</p>
               ) : (
                 <Table className="min-w-[560px] table-fixed">
                   <colgroup>
                     <col className="w-[27%]" />
-                    <col className="w-[21%]" />
+                    <col className="w-[19%]" />
                     <col />
-                    <col className="w-16" />
+                    <col className="w-20" />
                     <col className="w-24" />
                   </colgroup>
                   <TableHeader>
                     <TableRow className="border-t-0">
                       <TableHead>Requisito</TableHead>
                       <TableHead>Quem exige</TableHead>
-                      <TableHead>Solução</TableHead>
+                      <TableHead>Resposta no plano</TableHead>
                       <TableHead numeric>Prazo</TableHead>
                       <TableHead numeric>Honorários</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {rows.map((row) => {
-                      const gap = row.status === 'gap';
+                      const line = lineByCode.get(row.code);
+                      const open = line !== undefined && !line.resolved;
                       return (
-                        <TableRow key={row.code} className={cn(!gap && 'bg-slate-50/60')}>
+                        <TableRow key={row.code} className={cn(!open && 'bg-slate-50/60')} data-testid={`gap-${row.code}`}>
                           <TableCell>
                             <div className="flex items-center gap-2">
-                              <StatusIcon status={row.status} />
-                              <span className={cn('font-medium', gap ? 'text-slate-900' : 'text-slate-600')}>{row.label}</span>
+                              <StatusIcon status={row.status} resolved={line?.resolved ?? false} />
+                              <span className={cn('font-medium', open ? 'text-slate-900' : 'text-slate-600')}>{row.label}</span>
                             </div>
                           </TableCell>
                           <TableCell className="text-xs text-slate-700">{row.requiredByLabel}</TableCell>
-                          <TableCell>
-                            {gap ? (
-                              <div className="flex flex-wrap items-center gap-1.5">
-                                <span className="text-xs text-slate-900">{row.solution.title}</span>
-                                <ExecutorBadge executor={row.solution.executorType} short />
-                              </div>
-                            ) : (
-                              <span className="text-xs text-slate-600">
-                                {row.status === 'compliant' ? 'Conforme' : 'Não aplicável sem refinanciamento'}
-                              </span>
-                            )}
-                          </TableCell>
-                          <TableCell numeric className={cn('text-xs', gap ? 'text-slate-900' : 'text-slate-600')}>
-                            {gap ? `${row.solution.deadlineDays} d` : '—'}
-                          </TableCell>
-                          <TableCell numeric className={cn('text-xs', gap ? 'text-slate-900' : 'text-slate-600')}>
-                            {gap ? formatEUR(row.solution.estimatedCost) : '—'}
-                          </TableCell>
+                          {line ? (
+                            <GapAnswer
+                              line={line}
+                              staff={staff}
+                              restoring={restore.isPending && restore.variables === row.code}
+                              onRestore={() => restore.mutate(row.code)}
+                            />
+                          ) : (
+                            <>
+                              <TableCell>
+                                <span className="text-xs text-slate-600">
+                                  {row.status === 'compliant' ? 'Conforme' : 'Não aplicável sem refinanciamento'}
+                                </span>
+                              </TableCell>
+                              <TableCell numeric className="text-xs text-slate-600">
+                                —
+                              </TableCell>
+                              <TableCell numeric className="text-xs text-slate-600">
+                                —
+                              </TableCell>
+                            </>
+                          )}
                         </TableRow>
                       );
                     })}
@@ -109,6 +147,67 @@ export function GapMatrix({ assessment }: { assessment: AssessmentDetail }) {
       </div>
       <Assumptions assessment={assessment} />
     </Card>
+  );
+}
+
+/** As três últimas colunas de uma lacuna: o que o plano lhe responde hoje, quando e por quanto. */
+function GapAnswer({
+  line,
+  staff,
+  restoring,
+  onRestore,
+}: {
+  line: GapLine;
+  staff: boolean;
+  restoring: boolean;
+  onRestore: () => void;
+}) {
+  const { task, coverage, resolved } = line;
+
+  if (!task) {
+    return (
+      <>
+        <TableCell>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-amber-800">Sem entregável no plano</span>
+            {staff && (
+              <Button variant="outline" size="sm" className="h-6 px-2 text-xs" onClick={onRestore} disabled={restoring}>
+                <RotateCcw aria-hidden /> {restoring ? 'A repor…' : 'Repor'}
+              </Button>
+            )}
+          </div>
+        </TableCell>
+        <TableCell numeric className="text-xs text-slate-600">
+          —
+        </TableCell>
+        <TableCell numeric className="text-xs text-slate-600">
+          —
+        </TableCell>
+      </>
+    );
+  }
+
+  const inProposal = coverage === 'proposal';
+  return (
+    <>
+      <TableCell>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className={cn('text-xs', coverage === 'excluded' ? 'text-slate-600' : 'text-slate-900')}>{task.title}</span>
+          {coverage === 'excluded' ? <Badge tone="outline">Fora da proposta</Badge> : <ExecutorBadge executor={task.executorType} short />}
+          {resolved && <Badge tone="success">Concluído</Badge>}
+        </div>
+      </TableCell>
+      <TableCell numeric className={cn('text-xs', coverage === 'excluded' ? 'text-slate-600' : 'text-slate-900')}>
+        {coverage === 'excluded' ? '—' : formatDatePt(task.deadline)}
+      </TableCell>
+      <TableCell
+        numeric
+        className={cn('text-xs', inProposal ? 'text-slate-900' : 'text-slate-600')}
+        title={coverage === 'internal' ? 'A cargo da empresa: não entra na proposta' : undefined}
+      >
+        {inProposal ? formatEUR(task.estimatedCost) : '—'}
+      </TableCell>
+    </>
   );
 }
 
@@ -130,6 +229,7 @@ function Assumptions({ assessment }: { assessment: AssessmentDetail }) {
         <p className="max-w-prose">
           Os valores em euros da carteira exposta e da penalização bancária são ordens de grandeza. O peso de cada lacuna e
           o agravamento de spread são pressupostos de trabalho da Plan4Sustain para o setor, não medições desta empresa.
+          São os do dia do diagnóstico: não mudam quando um entregável é concluído.
         </p>
         <dl className="grid max-w-3xl grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-[minmax(0,1fr)_auto]">
           <Line label={`Base exposta: ${formatPercent(input.topClientsShare)} de ${formatEUR(input.annualRevenue)} nos 3 maiores clientes`}>
@@ -144,7 +244,7 @@ function Assumptions({ assessment }: { assessment: AssessmentDetail }) {
             <Line
               label={
                 floor !== null
-                  ? `Peso usado: piso de bloqueio do setor (a soma das lacunas dava ${formatNumberPt(snapshot.commercialGapPoints / 100, 2)})`
+                  ? `Peso usado: mínimo do bloqueio setorial (a soma das lacunas dava ${formatNumberPt(snapshot.commercialGapPoints / 100, 2)})`
                   : snapshot.commercialGapPoints > 100
                     ? `Peso usado: limitado a 1,00 (a soma das lacunas dava ${formatNumberPt(snapshot.commercialGapPoints / 100, 2)})`
                     : 'Peso usado: soma das lacunas'
@@ -159,7 +259,9 @@ function Assumptions({ assessment }: { assessment: AssessmentDetail }) {
           {hasSpread && (
             <Line
               label={`Penalização bancária: ${formatEUR(assessment.creditLineToRefinance)} a refinanciar${
-                snapshot.spreadPenaltyBps ? ` × ${snapshot.spreadPenaltyBps} pontos base` : ''
+                snapshot.spreadPenaltyBps
+                  ? ` × ${formatBasisPoints(snapshot.spreadPenaltyBps)} ao ano (${snapshot.spreadPenaltyBps} pontos base)`
+                  : ''
               }`}
               strong
             >
@@ -181,18 +283,19 @@ function Line({ label, strong, children }: { label: string; strong?: boolean; ch
   );
 }
 
-function StatusIcon({ status }: { status: RequirementSnapshot['status'] }) {
-  if (status === 'gap') {
+function StatusIcon({ status, resolved }: { status: RequirementSnapshot['status']; resolved: boolean }) {
+  if (status === 'gap' && !resolved) {
     return (
       <span className="flex size-4 items-center justify-center rounded-sm bg-rose-100 text-rose-700" title="Lacuna">
         <X aria-label="Lacuna" className="size-3" />
       </span>
     );
   }
-  if (status === 'compliant') {
+  if (status === 'gap' || status === 'compliant') {
+    const label = status === 'gap' ? 'Lacuna resolvida' : 'Conforme';
     return (
-      <span className="flex size-4 items-center justify-center rounded-sm bg-emerald-100 text-emerald-700" title="Conforme">
-        <Check aria-label="Conforme" className="size-3" />
+      <span className="flex size-4 items-center justify-center rounded-sm bg-emerald-100 text-emerald-700" title={label}>
+        <Check aria-label={label} className="size-3" />
       </span>
     );
   }

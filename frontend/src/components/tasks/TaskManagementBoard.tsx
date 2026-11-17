@@ -14,6 +14,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState, ErrorBanner } from '@/components/ui/states';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useAssignableUsers } from '@/hooks/useAuth';
 import { useUpdateTask } from '@/hooks/useTasks';
 import { errorMessage } from '@/lib/api';
 import { isStaffSession, useSession } from '@/lib/session';
@@ -50,6 +51,8 @@ export function TaskManagementBoard({ assessment, tasksQuery }: TaskManagementBo
 
   const allTasks = tasksQuery.data ?? [];
   const visible = applyTaskFilters(allTasks, filters);
+  const assignable = useAssignableUsers();
+  const assigneeNames = new Map((assignable.data ?? []).map((user) => [user.id, user.fullName]));
   // Mantém o painel sincronizado com a versão mais recente da tarefa aberta.
   const sheetTask = sheet.task ? (allTasks.find((t) => t.id === sheet.task?.id) ?? sheet.task) : null;
 
@@ -58,7 +61,11 @@ export function TaskManagementBoard({ assessment, tasksQuery }: TaskManagementBo
       <CardHeader className="items-center">
         <div>
           <CardTitle>Plano de ação e orçamento</CardTitle>
-          <CardDescription>Ligue, desligue ou passe a interno cada entregável. Os totais no topo atualizam no momento.</CardDescription>
+          <CardDescription>
+            {staff
+              ? 'Ligue, desligue ou passe a interno cada entregável. Os totais no topo atualizam no momento.'
+              : 'Pode atualizar o estado e o responsável de cada tarefa e acrescentar tarefas internas. O âmbito, o prazo, o executor e os honorários dos entregáveis são definidos pela P4S.'}
+          </CardDescription>
         </div>
         <Button size="sm" onClick={() => openTask(null)} disabled={!tasksQuery.isSuccess}>
           <Plus aria-hidden /> Nova tarefa
@@ -87,15 +94,21 @@ export function TaskManagementBoard({ assessment, tasksQuery }: TaskManagementBo
           <EmptyState
             icon={ClipboardCheck}
             title="Sem tarefas neste plano"
-            description="O diagnóstico não encontrou lacunas no âmbito avaliado. Pode acrescentar uma tarefa ou fazer um novo stress test."
+            description={
+              staff
+                ? 'O diagnóstico não encontrou lacunas no âmbito avaliado, ou os entregáveis foram eliminados. Pode acrescentar uma tarefa ou fazer um novo diagnóstico.'
+                : 'O diagnóstico não encontrou lacunas no âmbito avaliado. Pode acrescentar tarefas internas.'
+            }
             action={
               <div className="flex gap-2">
                 <Button size="sm" variant="outline" onClick={() => openTask(null)}>
                   <Plus aria-hidden /> Nova tarefa
                 </Button>
-                <Button asChild size="sm">
-                  <Link to="/">Iniciar Primeiro Stress Test</Link>
-                </Button>
+                {staff && (
+                  <Button asChild size="sm">
+                    <Link to="/">Novo diagnóstico</Link>
+                  </Button>
+                )}
               </div>
             }
           />
@@ -105,7 +118,7 @@ export function TaskManagementBoard({ assessment, tasksQuery }: TaskManagementBo
               <TabsTrigger value="proposal">
                 <Rows3 aria-hidden />
                 <span className="sm:hidden">Proposta</span>
-                <span className="hidden sm:inline">Configurador de plano e orçamento</span>
+                <span className="hidden sm:inline">{staff ? 'Configurador de plano e orçamento' : 'Plano e orçamento'}</span>
               </TabsTrigger>
               <TabsTrigger value="execution">
                 <Columns3 aria-hidden />
@@ -136,6 +149,8 @@ export function TaskManagementBoard({ assessment, tasksQuery }: TaskManagementBo
                     staff={staff}
                     today={today}
                     assessment={assessment}
+                    filtered={hasActiveFilters(filters)}
+                    assigneeNames={assigneeNames}
                     onPatch={patchTask}
                     onOpen={openTask}
                   />
@@ -144,6 +159,7 @@ export function TaskManagementBoard({ assessment, tasksQuery }: TaskManagementBo
                   <ExecutionKanban
                     tasks={visible}
                     today={today}
+                    assigneeNames={assigneeNames}
                     onStatusChange={(task, status) => patchTask(task, { status })}
                     onOpen={openTask}
                   />
