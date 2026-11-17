@@ -55,6 +55,8 @@ interface LiveImpactPreviewProps {
   sectorProfile: SectorProfile;
   annualRevenue: number;
   creditLineToRefinance: number;
+  /** O refinanciamento está ligado, mas o montante ainda não foi indicado. */
+  creditAmountMissing: boolean;
   onUseSampleRevenue: () => void;
   saveArea: ReactNode;
 }
@@ -85,7 +87,7 @@ export function LiveImpactPreview({ source, saveArea, ...props }: LiveImpactPrev
       ) : source.kind === 'full' ? (
         <FullPreview source={source} {...props} />
       ) : (
-        <PublicPreview source={source} />
+        <PublicPreview source={source} creditAmountMissing={props.creditAmountMissing} />
       )}
       <div className="border-t border-slate-200 bg-slate-50 px-4 py-3">{saveArea}</div>
     </Card>
@@ -98,6 +100,7 @@ function FullPreview({
   source,
   sectorProfile,
   creditLineToRefinance,
+  creditAmountMissing,
 }: Omit<LiveImpactPreviewProps, 'source' | 'saveArea'> & { source: Extract<PreviewSource, { kind: 'full' }> }) {
   if (source.loadError) {
     return (
@@ -198,11 +201,13 @@ function FullPreview({
           tone={result.estimatedSpreadPenalty > 0 ? 'amber' : 'plain'}
           size="sm"
         >
-          {creditLineToRefinance <= 0
-            ? 'Sem refinanciamento'
-            : result.evaluations.some((e) => e.requirement.code === 'banking_esg' && e.status === 'compliant')
-              ? 'Com rácios ESG, sem agravamento'
-              : `${catalog.spreadPenaltyBps} bps sobre ${formatEUR(creditLineToRefinance)}`}
+          {creditAmountMissing
+            ? 'Falta o montante a refinanciar'
+            : creditLineToRefinance <= 0
+              ? 'Sem refinanciamento'
+              : result.evaluations.some((e) => e.requirement.code === 'banking_esg' && e.status === 'compliant')
+                ? 'Com rácios ESG, sem agravamento'
+                : `${catalog.spreadPenaltyBps} bps sobre ${formatEUR(creditLineToRefinance)}`}
         </Metric>
         <Metric label="Bloqueadores críticos" value={String(result.criticalGapCount)} tone={result.criticalGapCount > 0 ? 'rose' : 'plain'}>
           prioridade crítica
@@ -250,7 +255,13 @@ function FullPreview({
 
 // ── Sem sessão ──────────────────────────────────────────────────────────────────────
 
-function PublicPreview({ source }: { source: Extract<PreviewSource, { kind: 'public' }> }) {
+function PublicPreview({
+  source,
+  creditAmountMissing,
+}: {
+  source: Extract<PreviewSource, { kind: 'public' }>;
+  creditAmountMissing: boolean;
+}) {
   if (source.error && !source.simulation) {
     return (
       <div className="p-4">
@@ -305,7 +316,7 @@ function PublicPreview({ source }: { source: Extract<PreviewSource, { kind: 'pub
           tone={spreadPenalty ? 'amber' : 'plain'}
           size="xs"
         >
-          {spreadPenalty ? 'agravamento de spread' : 'sem agravamento'}
+          {creditAmountMissing ? 'falta o montante a refinanciar' : spreadPenalty ? 'agravamento de spread' : 'sem agravamento'}
         </Metric>
         <Metric label="Lacunas" value={String(gapCount)} tone={criticalGapCount > 0 ? 'rose' : 'plain'}>
           {criticalGapCount} {criticalGapCount === 1 ? 'crítica' : 'críticas'}

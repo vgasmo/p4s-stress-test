@@ -163,6 +163,9 @@ export function AssessmentWizard() {
   const typedName = state.companyName.trim();
   const nifValid = isValidNif(typedNif);
   const nameValid = typedName.length >= 2;
+  // Refinanciamento ligado sem montante: para o cálculo é como se não houvesse refinanciamento,
+  // por isso o ecrã pede o montante em vez de dar a banca como não aplicável.
+  const creditMissing = state.hasRefinancing && state.creditLineToRefinance <= 0;
   // O que falta para gravar, dito junto ao botão. Uma coisa de cada vez, pela ordem do ecrã.
   const saveBlocker = !staff
     ? null
@@ -172,7 +175,9 @@ export function AssessmentWizard() {
         ? 'Corrija o valor assinalado antes de guardar.'
         : state.annualRevenue <= 0
           ? 'Indique a faturação anual antes de guardar.'
-          : null;
+          : creditMissing
+            ? 'Indique o montante a refinanciar, ou desligue o refinanciamento, antes de guardar.'
+            : null;
   const canSave = staff && saveBlocker === null;
   // Empresa já registada com o NIF que está a ser escrito: o diagnóstico vai para ela.
   const existingByNif = quickCreate && nifValid ? companies.data?.find((entry) => entry.nif === typedNif) : undefined;
@@ -342,7 +347,14 @@ export function AssessmentWizard() {
                   value={state.creditLineToRefinance}
                   onValueChange={(creditLineToRefinance) => update({ creditLineToRefinance })}
                   onInvalidChange={(credit) => setUnread((current) => ({ ...current, credit }))}
+                  aria-invalid={creditMissing && triedSave ? true : undefined}
+                  aria-describedby={creditMissing ? 'credit-line-missing' : undefined}
                 />
+                {creditMissing && !unread.credit && (
+                  <FieldHint id="credit-line-missing" className="font-medium text-amber-800">
+                    Indique o montante a refinanciar. Enquanto estiver a 0&nbsp;€, a banca não entra no cálculo.
+                  </FieldHint>
+                )}
                 <Presets
                   values={CREDIT_PRESETS}
                   current={state.creditLineToRefinance}
@@ -366,6 +378,7 @@ export function AssessmentWizard() {
               const field = requirement.answerField;
               const status = requirementStatus(requirement, input);
               const notApplicable = status === 'not_applicable';
+              const amountMissing = notApplicable && creditMissing;
               // O peso só é conhecido com sessão (vem com o catálogo).
               const impact = !catalog.data
                 ? null
@@ -380,11 +393,15 @@ export function AssessmentWizard() {
                     </label>
                     <p className="text-xs text-slate-600">
                       Exigido por {describeSources(requirement.requiredBy)}
-                      {notApplicable ? ' · só conta com refinanciamento a <18 meses' : ''}
+                      {amountMissing
+                        ? ' · falta o montante a refinanciar'
+                        : notApplicable
+                          ? ' · só conta com refinanciamento a <18 meses'
+                          : ''}
                     </p>
                   </div>
                   {impact && <span className="hidden font-mono text-xs tabular-nums text-slate-700 sm:block">{impact}</span>}
-                  <StatusPill status={status} />
+                  {amountMissing ? <Badge tone="high">Falta o montante</Badge> : <StatusPill status={status} />}
                   <Switch
                     id={`req-${requirement.code}`}
                     checked={state[field]}
@@ -419,6 +436,7 @@ export function AssessmentWizard() {
         sectorProfile={state.sectorProfile}
         annualRevenue={state.annualRevenue}
         creditLineToRefinance={input.creditLineToRefinance}
+        creditAmountMissing={creditMissing}
         onUseSampleRevenue={() => pickAmount('revenue', { annualRevenue: 5_000_000 })}
         saveArea={
           <SaveArea
