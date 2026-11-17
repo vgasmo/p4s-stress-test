@@ -1,0 +1,210 @@
+// Resumo executivo de 1 página A4 vertical. Invisível no ecrã, é a única coisa impressa
+// (botão «Exportar Resumo Executivo» → window.print → Guardar como PDF).
+
+import { createPortal } from 'react-dom';
+import type { AssessmentDetail } from '@engine/models/api.types';
+import type { Task, TaskPhase } from '@engine/models/domain';
+import { countsTowardsProposal, summarizeRemediation } from '@engine/services/remediation-summary';
+import { SPREAD_PENALTY_BPS } from '@engine/services/requirements.catalog';
+import { FOOTER_SIGNATURE, Wordmark } from '@/components/layout/AppShell';
+import {
+  EXECUTOR_SHORT_LABELS,
+  PHASE_LABELS,
+  addDays,
+  formatDatePt,
+  formatEUR,
+  formatMultiple,
+  formatNumberPt,
+  formatPerYear,
+  formatPercent,
+  formatShareOfRisk,
+  sectorLabel,
+  todayInLisbon,
+} from '@/lib/formatters';
+
+const PHASES: TaskPhase[] = ['phase_1_urgent', 'phase_2_structural'];
+const PROPOSAL_VALIDITY_DAYS = 30;
+
+export function ExecutivePrintView({ assessment, tasks }: { assessment: AssessmentDetail; tasks: Task[] }) {
+  const { company, snapshot } = assessment;
+  const summary = summarizeRemediation(tasks, assessment.commercialRevenueAtRisk, assessment.estimatedSpreadPenalty);
+  const included = tasks.filter((task) => task.includedInProposal);
+  const gaps = snapshot.requirements.filter((r) => r.status === 'gap');
+  const issuedOn = todayInLisbon();
+
+  // Fora da moldura da app, que não é impressa quando esta vista existe.
+  return createPortal(
+    <div data-print-view className="hidden bg-white print:block" data-testid="executive-print-view">
+      <article className="text-[11px] leading-snug text-slate-900">
+        <header className="flex items-start justify-between border-b-2 border-slate-900 pb-2">
+          <div>
+            <Wordmark className="text-[13px]" />
+            <p className="mt-0.5 text-[9px] text-slate-700">Conformidade documental para a cadeia de fornecimento</p>
+          </div>
+          <p className="text-right text-[9px] text-slate-700">
+            Emitido em <span className="font-mono tabular-nums">{formatDatePt(issuedOn)}</span>
+          </p>
+        </header>
+
+        <h1 className="mt-3 text-[17px] font-semibold tracking-tight">Diagnóstico de Qualificação e Exposição de Faturação</h1>
+        <dl className="mt-1.5 grid grid-cols-[minmax(0,2.2fr)_minmax(0,1fr)_minmax(0,1.8fr)_minmax(0,1fr)] gap-x-4 border-b border-slate-300 pb-2">
+          <Meta label="Empresa" value={company.name} />
+          <Meta label="NIF" value={company.nif} mono />
+          <Meta label="Setor" value={sectorLabel(assessment.sectorProfile)} />
+          <Meta label="Data do diagnóstico" value={formatDatePt(snapshot.baseDate)} mono />
+        </dl>
+
+        <section className="mt-3 grid grid-cols-3 gap-2.5 print-avoid-break">
+          <Kpi label="Faturação comercial em risco" value={formatEUR(assessment.commercialRevenueAtRisk)} accent="text-rose-700">
+            {formatPercent(snapshot.commercialRevenueAtRiskShare, 1)} da faturação anual · score {assessment.riskScore}/100
+          </Kpi>
+          <Kpi label="Sobrecusto bancário anual" value={formatPerYear(assessment.estimatedSpreadPenalty)} accent="text-amber-800">
+            {assessment.creditLineToRefinance > 0
+              ? `${SPREAD_PENALTY_BPS} bps sobre ${formatEUR(assessment.creditLineToRefinance)} a refinanciar`
+              : 'Sem refinanciamento nos próximos 18 meses'}
+          </Kpi>
+          <Kpi label="Investimento de remediação" value={formatEUR(summary.totalInvestment)}>
+            Fase 1 {formatEUR(summary.phase1Cost)} · Fase 2 {formatEUR(summary.phase2Cost)}
+            {summary.phase1CostShareOfRisk !== null && summary.phase1Cost > 0
+              ? ` · Fase 1 = ${formatShareOfRisk(summary.phase1CostShareOfRisk)} da faturação em risco`
+              : ''}
+            {summary.totalInvestment > 0 ? ` · proteção ${formatMultiple(summary.protectionRatio)}` : ''}
+          </Kpi>
+        </section>
+
+        {snapshot.dealbreaker && (
+          <p className="mt-2 border-l-2 border-rose-700 pl-2 text-[9px] text-slate-800">
+            <span className="font-semibold">Bloqueio setorial (peso mínimo {formatNumberPt(snapshot.dealbreaker.floorPoints / 100, 2)}).</span>{' '}
+            {snapshot.dealbreaker.reason}
+          </p>
+        )}
+
+        <section className="mt-4 print-avoid-break">
+          <h2 className="text-[12.5px] font-semibold">Lacunas identificadas</h2>
+          {gaps.length === 0 ? (
+            <p className="mt-1 text-slate-700">Sem lacunas no âmbito avaliado.</p>
+          ) : (
+            <table className="mt-1 w-full border-collapse">
+              <thead>
+                <tr className="border-b border-slate-400 text-left text-[8.5px] uppercase tracking-wide text-slate-700">
+                  <th className="py-1 pr-2 font-medium">Requisito</th>
+                  <th className="py-1 pr-2 font-medium">Quem exige</th>
+                  <th className="py-1 pr-2 font-medium">Solução</th>
+                  <th className="py-1 text-right font-medium">Fase</th>
+                </tr>
+              </thead>
+              <tbody>
+                {gaps.map((gap) => (
+                  <tr key={gap.code} className="border-b border-slate-200">
+                    <td className="py-1.5 pr-2 font-medium">{gap.label}</td>
+                    <td className="py-1.5 pr-2">{gap.requiredByLabel}</td>
+                    <td className="py-1.5 pr-2">{gap.solution.title}</td>
+                    <td className="py-1.5 text-right font-mono tabular-nums">{gap.solution.phase === 'phase_1_urgent' ? '1' : '2'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+
+        <section className="mt-4 print-avoid-break">
+          <h2 className="text-[12.5px] font-semibold">Plano de ação faseado</h2>
+          <table className="mt-1 w-full border-collapse">
+            <thead>
+              <tr className="border-b border-slate-400 text-left text-[8.5px] uppercase tracking-wide text-slate-700">
+                <th className="py-1 pr-2 font-medium">Entregável</th>
+                <th className="py-1 pr-2 font-medium">Entidade executora</th>
+                <th className="py-1 pr-2 text-right font-medium">Prazo</th>
+                <th className="py-1 text-right font-medium">Honorários fixos</th>
+              </tr>
+            </thead>
+            {PHASES.map((phase) => {
+              const rows = included.filter((task) => task.phase === phase);
+              const subtotal = phase === 'phase_1_urgent' ? summary.phase1Cost : summary.phase2Cost;
+              return (
+                <tbody key={phase}>
+                  <tr className="bg-slate-100">
+                    <td colSpan={3} className="px-1 py-1 text-[9px] font-semibold">
+                      {PHASE_LABELS[phase]}
+                    </td>
+                    <td className="px-1 py-1 text-right font-mono text-[9px] font-semibold tabular-nums">{formatEUR(subtotal)}</td>
+                  </tr>
+                  {rows.length === 0 ? (
+                    <tr className="border-b border-slate-200">
+                      <td colSpan={4} className="py-1 text-slate-700">
+                        Sem entregáveis nesta fase.
+                      </td>
+                    </tr>
+                  ) : (
+                    rows.map((task) => (
+                      <tr key={task.id} className="border-b border-slate-200">
+                        <td className="py-1.5 pr-2">{task.title}</td>
+                        <td className="py-1.5 pr-2">{EXECUTOR_SHORT_LABELS[task.executorType]}</td>
+                        <td className="py-1.5 pr-2 text-right font-mono tabular-nums">{formatDatePt(task.deadline)}</td>
+                        <td className="py-1.5 text-right font-mono tabular-nums">
+                          {countsTowardsProposal(task) ? formatEUR(task.estimatedCost) : '—'}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              );
+            })}
+            <tfoot>
+              <tr className="border-t-2 border-slate-900">
+                <td colSpan={3} className="py-1 font-semibold">
+                  Total (P4S + parceiro)
+                </td>
+                <td className="py-1.5 text-right font-mono font-semibold tabular-nums">{formatEUR(summary.totalInvestment)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </section>
+
+        <footer className="mt-5 border border-slate-400 p-3 print-avoid-break">
+          <p className="text-[11px] font-semibold">
+            Proposta de honorários fixos válida por {PROPOSAL_VALIDITY_DAYS} dias
+            <span className="font-normal text-slate-700">
+              {' '}
+              (até <span className="font-mono tabular-nums">{formatDatePt(addDays(issuedOn, PROPOSAL_VALIDITY_DAYS))}</span>)
+            </span>
+          </p>
+          <div className="mt-5 grid grid-cols-2 gap-6 text-[9px] text-slate-700">
+            <Signature label={`Aceite por ${company.name}`} />
+            <Signature label="Plan4Sustain" />
+          </div>
+          <p className="mt-3 text-[8.5px] text-slate-700">{FOOTER_SIGNATURE}</p>
+        </footer>
+      </article>
+    </div>,
+    document.body,
+  );
+}
+
+function Meta({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[8.5px] uppercase tracking-wide text-slate-700">{label}</dt>
+      <dd className={mono ? 'font-mono font-medium tabular-nums' : 'break-words font-medium'}>{value}</dd>
+    </div>
+  );
+}
+
+function Kpi({ label, value, accent, children }: { label: string; value: string; accent?: string; children: React.ReactNode }) {
+  return (
+    <div className="border border-slate-300 px-2 py-1.5">
+      <p className="text-[8.5px] uppercase tracking-wide text-slate-700">{label}</p>
+      <p className={`mt-0.5 font-mono text-[19px] font-semibold tabular-nums ${accent ?? 'text-slate-900'}`}>{value}</p>
+      <p className="mt-0.5 text-[8.5px] text-slate-700">{children}</p>
+    </div>
+  );
+}
+
+function Signature({ label }: { label: string }) {
+  return (
+    <div>
+      <div className="h-6 border-b border-slate-500" />
+      <p className="mt-1">{label} · Data ____/____/______</p>
+    </div>
+  );
+}

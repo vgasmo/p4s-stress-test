@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  body {
+    @apply bg-slate-50 text-sm text-slate-900;
+  }
+  .font-mono {
+    font-feature-settings: 'zero' 0;
+  }
+}
+
+/* Impressão: folha A4 vertical, fundo branco, sem sombras. */
+@page {
+  size: A4 portrait;
+  margin: 12mm 14mm;
+}
+
+@media print {
+  html,
+  body {
+    background: #fff !important;
+  }
+  /* Com um resumo executivo na página, imprime-se só o resumo, em escala de documento. */
+  html:has([data-print-view]) {
+    font-size: 10px;
+  }
+  body:has([data-print-view]) [data-app-shell] {
+    display: none !important;
+  }
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    box-shadow: none !important;
+  }
+  .print-avoid-break {
+    break-inside: avoid;
+  }
+}

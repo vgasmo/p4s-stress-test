@@ -1,0 +1,112 @@
+// CRUD de tarefas com isolamento por empresa e RBAC.
+//
+// Regras para company_user (utilizador da fábrica):
+//   - não elimina tarefas (a rota DELETE só aceita a equipa P4S);
+//   - em tarefas P4S ou do parceiro não altera os termos da proposta: custo estimado,
+//     executor, fase e inclusão na proposta. Pode atualizar estado, prazo e responsável;
+//   - só cria tarefas internas e não passa tarefas internas para a P4S ou o parceiro.
+
+import { pool, withTransaction, type Queryable } from '../config/database.js';
+import { assessmentModel } from '../models/assessment.model.js';
+import { isPricedExecutor, isStaffRole, type Task, type TenantContext } from '../models/domain.js';
+import type { CreateTaskInput, TaskListQuery, UpdateTaskInput } from '../models/schemas.js';
+import { taskModel, type TaskPatch } from '../models/task.model.js';
+import { userModel } from '../models/user.model.js';
+import { badRequest, forbidden, notFound } from '../utils/errors.js';
+
+const PROPOSAL_TERMS = ['estimatedCost', 'executorType', 'phase', 'includedInProposal'] as const;
+
+async function assertAssignable(db: Queryable, companyId: string, userId: string): Promise<void> {
+  const user = await userModel.findById(db, userId);
+  const belongs = user?.companyId === companyId || (user !== null && isStaffRole(user.role));
+  if (!user || !user.isActive || !belongs) throw badRequest('Responsável inválido para esta empresa.');
+}
+
+function assertCompanyUserCanPatch(current: Task, patch: TaskPatch): void {
+  if (isPricedExecutor(current.executorType)) {
+    const changed = PROPOSAL_TERMS.filter((field) => patch[field] !== undefined && patch[field] !== current[field]);
+    if (changed.length > 0) {
+      throw forbidden(
+        'Custo, executor, fase e inclusão na proposta de tarefas da P4S ou do parceiro só podem ser alterados pela P4S.',
+      );
+    }
+    return;
+  }
+  if (patch.executorType !== undefined && isPricedExecutor(patch.executorType)) {
+    throw forbidden('Só a P4S pode atribuir tarefas à P4S ou ao parceiro.');
+  }
+}
+
+const toPatch = (input: UpdateTaskInput): TaskPatch => {
+  const patch: TaskPatch = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (value !== undefined) (patch as Record<string, unknown>)[key] = value;
+  }
+  return patch;
+};
+
+export const taskService = {
+  async list(ctx: TenantContext, query: TaskListQuery): Promise<Task[]> {
+    return taskModel.list(pool, ctx.companyId, {
+      status: query.status,
+      domain: query.domain,
+      priority: query.priority,
+      executorType: query.executor_type,
+      phase: query.phase,
+      assessmentId: query.assessment_id,
+    });
+  },
+
+  async get(ctx: TenantContext, id: string): Promise<Task> {
+    const task = await taskModel.findById(pool, ctx.companyId, id);
+    if (!task) throw notFound('Tarefa não encontrada.');
+    return task;
+  },
+
+  async create(ctx: TenantContext, input: CreateTaskInput): Promise<Task> {
+    const staff = isStaffRole(ctx.role);
+    const executorType = input.executorType ?? (staff ? 'p4s' : 'internal');
+    if (!staff && isPricedExecutor(executorType)) {
+      throw forbidden('Utilizadores da empresa só podem criar tarefas internas.');
+    }
+
+    const assessment = await assessmentModel.findById(pool, ctx.companyId, input.assessmentId);
+    if (!assessment) throw notFound('Avaliação não encontrada.');
+    if (input.assignedUserId) await assertAssignable(pool, ctx.companyId, input.assignedUserId);
+
+    return taskModel.insert(pool, ctx.companyId, assessment.id, {
+      title: input.title,
+      description: input.description ?? null,
+      domain: input.domain,
+      priority: input.priority,
+      status: input.status,
+      executorType,
+      phase: input.phase,
+      includedInProposal: input.includedInProposal,
+      estimatedCost: input.estimatedCost,
+      deadline: input.deadline ?? null,
+      assignedUserId: input.assignedUserId ?? null,
+    });
+  },
+
+  async update(ctx: TenantContext, id: string, input: UpdateTaskInput): Promise<Task> {
+    const patch = toPatch(input);
+    return withTransaction(async (client) => {
+      const current = await taskModel.findById(client, ctx.companyId, id, { forUpdate: true });
+      if (!current) throw notFound('Tarefa não encontrada.');
+      if (!isStaffRole(ctx.role)) assertCompanyUserCanPatch(current, patch);
+      if (patch.assignedUserId) await assertAssignable(client, ctx.companyId, patch.assignedUserId);
+
+      const updated = await taskModel.update(client, ctx.companyId, id, patch);
+      if (!updated) throw notFound('Tarefa não encontrada.');
+      return updated;
+    });
+  },
+
+  async remove(ctx: TenantContext, id: string): Promise<void> {
+    // A rota já exige equipa P4S. Verificação repetida aqui por defesa em profundidade.
+    if (!isStaffRole(ctx.role)) throw forbidden('Só a equipa P4S pode eliminar tarefas.');
+    const removed = await taskModel.remove(pool, ctx.companyId, id);
+    if (!removed) throw notFound('Tarefa não encontrada.');
+  },
+};

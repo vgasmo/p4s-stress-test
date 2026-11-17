@@ -1,0 +1,155 @@
+// Contratos de entrada da API (validação estrita: campos desconhecidos são recusados).
+
+import { z } from 'zod';
+import { MAX_MONEY_AMOUNT } from '../services/stress-test-calculator.service.js';
+import { isValidIsoDate } from '../utils/dates.js';
+import { isValidCae, isValidNif } from '../utils/validation.js';
+import {
+  SECTOR_PROFILES,
+  TASK_DOMAINS,
+  TASK_EXECUTORS,
+  TASK_PHASES,
+  TASK_PRIORITIES,
+  TASK_STATUSES,
+} from './domain.js';
+
+const id = z.guid('Identificador inválido.');
+const money = z.number().nonnegative('Não pode ser negativo.').max(MAX_MONEY_AMOUNT);
+/** NUMERIC(10, 2) */
+const taskCost = z.number().nonnegative('Não pode ser negativo.').max(99_999_999.99);
+const isoDate = z.string().refine(isValidIsoDate, 'Data inválida (AAAA-MM-DD).');
+const share = z.number().min(0, 'Mínimo 0%.').max(100, 'Máximo 100%.');
+const nif = z.string().trim().refine(isValidNif, 'NIF inválido.');
+const cae = z.string().trim().refine(isValidCae, 'CAE inválido (5 dígitos).');
+const companyName = z.string().trim().min(2, 'Nome demasiado curto.').max(255);
+const sectorProfile = z.enum(SECTOR_PROFILES);
+
+export const idParamsSchema = z.object({ id });
+
+// Auth
+
+export const loginSchema = z.strictObject({
+  email: z.string().trim().toLowerCase().max(255).pipe(z.email('Email inválido.')),
+  password: z.string().min(1, 'Palavra-passe em falta.').max(200),
+  companyId: id.optional(),
+});
+export type LoginInput = z.infer<typeof loginSchema>;
+
+export const refreshSchema = z.strictObject({
+  refreshToken: z.string().min(1).max(4096),
+  /** Equipa P4S: muda a empresa selecionada (null limpa). */
+  companyId: id.nullable().optional(),
+});
+export type RefreshInput = z.infer<typeof refreshSchema>;
+
+// Empresas
+
+export const createCompanySchema = z.strictObject({
+  name: companyName,
+  nif,
+  cae,
+  sectorProfile: sectorProfile.default('general_industrial'),
+  annualRevenue: money.default(0),
+  exportPercentage: share.default(0),
+});
+export type CreateCompanyInput = z.infer<typeof createCompanySchema>;
+
+/** Criação rápida em reunião: NIF + nome chegam. */
+export const quickCompanySchema = z.strictObject({
+  name: companyName,
+  nif,
+  cae: cae.optional(),
+  exportPercentage: share.optional(),
+});
+export type QuickCompanyInput = z.infer<typeof quickCompanySchema>;
+
+// Stress test
+
+const stressTestAnswers = {
+  topClientsShare: share,
+  creditLineToRefinance: money.default(0),
+  ecovadis: z.boolean(),
+  carbonFootprintScope12: z.boolean(),
+  carbonFootprintScope3: z.boolean(),
+  bankingEsgMetrics: z.boolean(),
+  tisaxOrNis2: z.boolean(),
+};
+
+export const simulateAssessmentSchema = z.strictObject({
+  sectorProfile,
+  annualRevenue: money,
+  ...stressTestAnswers,
+});
+export type SimulateAssessmentInput = z.infer<typeof simulateAssessmentSchema>;
+
+export const createAssessmentSchema = z.strictObject({
+  /** Sem company, usa a empresa da sessão. */
+  company: quickCompanySchema.optional(),
+  /** Por omissão, o setor e a faturação registados na empresa. */
+  sectorProfile: sectorProfile.optional(),
+  annualRevenue: money.optional(),
+  ...stressTestAnswers,
+});
+export type CreateAssessmentInput = z.infer<typeof createAssessmentSchema>;
+
+// Tarefas
+
+export const taskListQuerySchema = z.strictObject({
+  status: z.enum(TASK_STATUSES).optional(),
+  domain: z.enum(TASK_DOMAINS).optional(),
+  priority: z.enum(TASK_PRIORITIES).optional(),
+  executor_type: z.enum(TASK_EXECUTORS).optional(),
+  phase: z.enum(TASK_PHASES).optional(),
+  assessment_id: id.optional(),
+});
+export type TaskListQuery = z.infer<typeof taskListQuerySchema>;
+
+const taskFields = {
+  title: z.string().trim().min(3, 'Título demasiado curto.').max(255),
+  description: z.string().trim().max(5000).nullable(),
+  domain: z.enum(TASK_DOMAINS),
+  priority: z.enum(TASK_PRIORITIES),
+  status: z.enum(TASK_STATUSES),
+  executorType: z.enum(TASK_EXECUTORS),
+  phase: z.enum(TASK_PHASES),
+  includedInProposal: z.boolean(),
+  estimatedCost: taskCost,
+  deadline: isoDate.nullable(),
+  assignedUserId: id.nullable(),
+};
+
+export const createTaskSchema = z.strictObject({
+  assessmentId: id,
+  title: taskFields.title,
+  description: taskFields.description.optional(),
+  domain: taskFields.domain,
+  priority: taskFields.priority.default('medium'),
+  status: taskFields.status.default('backlog'),
+  /** Por omissão: p4s para a equipa P4S, internal para a empresa. */
+  executorType: taskFields.executorType.optional(),
+  phase: taskFields.phase.default('phase_1_urgent'),
+  includedInProposal: taskFields.includedInProposal.default(true),
+  estimatedCost: taskFields.estimatedCost.default(0),
+  deadline: taskFields.deadline.optional(),
+  assignedUserId: taskFields.assignedUserId.optional(),
+});
+export type CreateTaskInput = z.infer<typeof createTaskSchema>;
+
+export const updateTaskSchema = z
+  .strictObject({
+    title: taskFields.title.optional(),
+    description: taskFields.description.optional(),
+    domain: taskFields.domain.optional(),
+    priority: taskFields.priority.optional(),
+    status: taskFields.status.optional(),
+    executorType: taskFields.executorType.optional(),
+    phase: taskFields.phase.optional(),
+    includedInProposal: taskFields.includedInProposal.optional(),
+    estimatedCost: taskFields.estimatedCost.optional(),
+    deadline: taskFields.deadline.optional(),
+    assignedUserId: taskFields.assignedUserId.optional(),
+  })
+  .refine((patch) => Object.values(patch).some((value) => value !== undefined), {
+    message: 'Indique pelo menos um campo a alterar.',
+  });
+export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
