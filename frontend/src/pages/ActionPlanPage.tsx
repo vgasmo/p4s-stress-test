@@ -1,5 +1,5 @@
 import { Building2, ClipboardList, FilePlus2, FileWarning, Info, Pencil, Printer, RefreshCw, SearchX, Trash2 } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import type { AssessmentDetail, AssessmentListEntry } from '@engine/models/api.types';
 import { CompanySheet } from '@/components/company/CompanySheet';
@@ -74,10 +74,18 @@ export function ActionPlanPage() {
 /** /plano sem id: abre o diagnóstico mais recente da empresa que se consegue abrir. */
 function LatestAssessment({ staff }: { staff: boolean }) {
   const assessments = useAssessments();
-  const latest = assessments.data?.find((entry) => entry.openable);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const latestId = assessments.data?.find((entry) => entry.openable)?.id;
 
-  if (latest) return <Navigate to={`/plano/${latest.id}`} replace />;
-  if (assessments.isPending) return <PlanSkeleton />;
+  // Depende também da entrada do histórico (location.key). Ao trocar de empresa, o seletor
+  // navega para /plano no mesmo instante em que este ecrã abre o diagnóstico mais recente:
+  // se essa navegação chegar depois, o ecrã volta a abri-lo em vez de ficar vazio.
+  useEffect(() => {
+    if (latestId) navigate(`/plano/${latestId}`, { replace: true });
+  }, [latestId, location.key, navigate]);
+
+  if (latestId || assessments.isPending) return <PlanSkeleton />;
   if (assessments.isError) {
     return (
       <ErrorBanner
