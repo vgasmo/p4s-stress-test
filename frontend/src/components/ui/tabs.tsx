@@ -31,6 +31,14 @@ export const TabsContent = forwardRef<
   ElementRef<typeof TabsPrimitive.Content>,
   ComponentPropsWithoutRef<typeof TabsPrimitive.Content>
 >(({ className, ...props }, ref) => (
-  <TabsPrimitive.Content ref={ref} className={cn('focus-visible:outline-none', className)} {...props} />
+  // O painel é uma paragem de Tab (Radix): tem de se ver quando recebe o foco.
+  <TabsPrimitive.Content
+    ref={ref}
+    className={cn(
+      'rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2',
+      className,
+    )}
+    {...props}
+  />
 ));
 TabsContent.displayName = 'TabsContent';

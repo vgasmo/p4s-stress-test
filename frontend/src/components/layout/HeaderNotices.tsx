@@ -1,5 +1,5 @@
 import { WifiOff } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { Notice } from './Notice';
@@ -12,8 +12,26 @@ const SLOT_ID = 'header-notices';
  */
 export function HeaderNotices() {
   const online = useOnlineStatus();
+  const box = useRef<HTMLDivElement>(null);
+
+  // A altura do cabeçalho fixo fica numa variável CSS, que o scroll-padding usa (index.css)
+  // para o elemento focado nunca ficar por baixo dele.
+  useLayoutEffect(() => {
+    const header = box.current?.closest('header');
+    if (!header) return;
+    const root = document.documentElement;
+    const publish = () => root.style.setProperty('--app-header-height', `${Math.ceil(header.getBoundingClientRect().height)}px`);
+    publish();
+    const observer = new ResizeObserver(publish);
+    observer.observe(header);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty('--app-header-height');
+    };
+  }, []);
+
   return (
-    <div className="mx-auto max-w-[1400px] px-4 sm:px-6 [&>*]:mb-2">
+    <div ref={box} className="mx-auto max-w-[1400px] px-4 sm:px-6 [&>*]:mb-2">
       {!online && (
         <Notice tone="warning" role="status" icon={WifiOff} title="Sem ligação à internet." testId="connection-notice">
           <p className="text-xs text-amber-900">As alterações não ficam guardadas até a ligação voltar.</p>

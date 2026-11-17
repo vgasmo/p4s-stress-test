@@ -17,6 +17,7 @@ import { EmptyState, ErrorBanner } from '@/components/ui/states';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useTaskChanges } from '@/hooks/useTasks';
 import { errorMessage } from '@/lib/api';
+import { keepFocusAfterRedraw } from '@/lib/focus';
 import { isStaffSession, useSession } from '@/lib/session';
 import { ExecutionKanban } from './ExecutionKanban';
 import { ProposalConfigurator } from './ProposalConfigurator';
@@ -37,7 +38,11 @@ export function TaskManagementBoard({ assessment, tasksQuery }: TaskManagementBo
   const [sheet, setSheet] = useState<{ open: boolean; task: Task | null }>({ open: false, task: null });
   const today = todayInLisbon();
 
-  const patchTask = (task: Task, patch: UpdateTaskInput) => changes.change(task, patch);
+  const patchTask = (task: Task, patch: UpdateTaskInput) => {
+    // No kanban o cartão muda de coluna e é redesenhado: o foco passa para o seletor do cartão novo.
+    keepFocusAfterRedraw();
+    changes.change(task, patch);
+  };
   const openTask = (task: Task | null) => setSheet({ open: true, task });
 
   const allTasks = tasksQuery.data ?? [];

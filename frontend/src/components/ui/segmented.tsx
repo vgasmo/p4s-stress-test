@@ -16,6 +16,8 @@ interface SegmentedProps<T extends string> {
   className?: string;
 }
 
+const STEPS: Record<string, number> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+
 /** Grupo de opções exclusivas (radiogroup acessível por teclado). */
 export function Segmented<T extends string>({
   value,
@@ -32,11 +34,16 @@ export function Segmented<T extends string>({
       aria-label={label}
       className={cn('inline-flex rounded-md border border-slate-300 bg-white p-0.5', disabled && 'opacity-80', className)}
       onKeyDown={(event) => {
-        if (disabled || (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft')) return;
+        const step = STEPS[event.key];
+        if (disabled || step === undefined) return;
         event.preventDefault();
-        const index = options.findIndex((option) => option.value === value);
-        const next = options[(index + (event.key === 'ArrowRight' ? 1 : -1) + options.length) % options.length];
-        if (next) onChange(next.value);
+        const index = (options.findIndex((option) => option.value === value) + step + options.length) % options.length;
+        const next = options[index];
+        if (!next) return;
+        // Como num grupo de rádios nativo, o foco acompanha a escolha. Sem isto ficava na opção
+        // antiga, que deixa de estar na ordem do Tab.
+        event.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]')[index]?.focus();
+        onChange(next.value);
       }}
     >
       {options.map((option) => {

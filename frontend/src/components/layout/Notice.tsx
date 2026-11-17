@@ -60,7 +60,15 @@ export function Notice({
       {(onRetry || onDismiss) && (
         <div className="ml-auto flex shrink-0 gap-2">
           {onRetry && (
-            <Button variant="danger" size="sm" onClick={onRetry} disabled={retrying}>
+            // aria-disabled em vez de disabled: um botão desativado perde o foco, e quem usa o
+            // teclado ficava sem saber onde estava quando a nova tentativa acabasse.
+            <Button
+              variant="danger"
+              size="sm"
+              aria-disabled={retrying || undefined}
+              onClick={retrying ? undefined : onRetry}
+              className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
+            >
               <RotateCcw aria-hidden />
               Tentar novamente
             </Button>
