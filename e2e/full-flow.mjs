@@ -30,6 +30,8 @@ mkdirSync(OUT, { recursive: true });
 
 const nbsp = ' ';
 const eur = (text) => `${text}${nbsp}€`;
+/** Os valores formatados usam espaços que não partem linha: «≈ 2,8 M €» → com U+00A0. */
+const nb = (text) => text.replaceAll(' ', nbsp);
 let failures = 0;
 const log = (...args) => console.log('·', ...args);
 const fail = (message) => {
@@ -93,12 +95,17 @@ await page.getByRole('radio', { name: 'Moldes e componentes automóvel' }).click
 await page.getByRole('button', { name: '10M €' }).first().click();
 await page.getByRole('switch', { name: /EcoVadis/ }).click();
 await page.getByRole('switch', { name: /âmbitos 1 e 2/ }).click();
-// 10M × 60% = 6M; falta âmbito 3 (30) + TISAX (35) = 65 → piso 75 → 4.500.000 €
-await expectText('preview automóvel com piso', 'preview-revenue-at-risk', eur('4.500.000'));
+// Sem sessão o servidor devolve só o escalão. 10M × 60% = 6M; falta âmbito 3 e TISAX,
+// com piso de bloqueio: cai no escalão 60–80% → 3,6 M € a 4,8 M €.
+await expectText('sem sessão: escalão em vez do valor', 'preview-revenue-at-risk', `${nb('3,6 M €')} a ${nb('4,8 M €')}`);
 await page.getByText('Bloqueio setorial').waitFor();
 await page.getByRole('switch', { name: /Refinanciamento bancário/ }).click();
-await page.getByText('+8.000').waitFor();
-await page.waitForTimeout(250);
+await page.getByText('agravamento de spread').waitFor();
+await settle();
+const publicText = await page.locator('body').innerText();
+expectEq('sem sessão: a página não mostra preços', /\d\.\d{3}\s€(?!\/ano)/.test(publicText.split('O que falta')[1] ?? ''), false);
+expectEq('sem sessão: a página não mostra pesos', /na exposição|bps/.test(publicText), false);
+expectEq('sem sessão: o catálogo não é servido', (await page.request.get(`${BASE}/api/v1/catalog`)).status(), 401);
 await page.screenshot({ path: `${OUT}/01-wizard-anonimo.png`, fullPage: true });
 
 // ── 2. Entrar como empresa: a simulação feita antes mantém-se ───────────────────────
@@ -106,10 +113,13 @@ await page.getByRole('link', { name: /Entrar para guardar/ }).click();
 await loginAs(COMPANY_EMAIL, COMPANY_PASSWORD);
 await page.waitForURL(/\/$/);
 await page.getByText('Moldes Exemplo, Lda (demonstração)').first().waitFor();
-await expectText('simulação mantida depois de entrar (empresa)', 'preview-revenue-at-risk', eur('4.500.000'));
+// Com sessão passa a ver o valor estimado (ordem de grandeza): 6M × 0,75 = 4.500.000 €.
+await expectText('simulação mantida depois de entrar (empresa)', 'preview-revenue-at-risk', nb('≈ 4,5 M €'));
+expectEq('com sessão: valor calculado disponível', await page.getByTestId('preview-revenue-at-risk').getAttribute('title'), `Valor calculado: ${eur('4.500.000')}`);
 await logout();
-await page.getByText('Modo reunião').waitFor();
-await expectText('rascunho limpo ao sair (não mostra dados do cliente)', 'preview-revenue-at-risk', eur('3.000.000'));
+await page.getByText('Sem registo, vê a ordem de grandeza').waitFor();
+// Rascunho de origem (5M, 60%, nada conforme): escalão 80–100% de 3M.
+await expectText('rascunho limpo ao sair (não mostra dados do cliente)', 'preview-revenue-at-risk', `${nb('2,4 M €')} a ${nb('3 M €')}`);
 
 // ── 3. Equipa P4S sem empresa: escolher a empresa abre o plano, «sem empresa» volta ──
 await page.goto(BASE + '/entrar');
@@ -123,7 +133,7 @@ log('P4S sem empresa → escolher a empresa abre o plano dela');
 await page.getByLabel('Empresa cliente').selectOption('');
 await page.waitForURL(/\/$/);
 await page.getByLabel('NIF').waitFor();
-await expectText('P4S → «sem empresa» volta ao stress test com rascunho limpo', 'preview-revenue-at-risk', eur('3.000.000'));
+await expectText('P4S → «sem empresa» volta ao stress test com rascunho limpo', 'preview-revenue-at-risk', nb('≈ 3 M €'));
 
 // ── 3b. Criação rápida de empresa por NIF + nome e gravação ─────────────────────────
 await page.getByLabel('Nome').fill('Embalagens Reunião E2E, Lda');
@@ -138,11 +148,11 @@ await page.getByRole('button', { name: '2M €' }).first().click();
 await page.getByRole('switch', { name: /âmbitos 1 e 2/ }).click();
 await page.getByRole('switch', { name: /Segurança da informação/ }).click();
 // 2M × 60% = 1,2M; EcoVadis 45 + âmbito 3 20 = 65 (piso agro 65) → 780.000 €
-await expectText('preview agro', 'preview-revenue-at-risk', eur('780.000'));
+await expectText('preview agro', 'preview-revenue-at-risk', nb('≈ 780 mil €'));
 await page.getByRole('button', { name: /Guardar Diagnóstico/ }).click();
 await page.waitForURL(/\/plano\/[0-9a-f-]{36}$/);
 await page.getByTestId('kpi-total').waitFor();
-await expectText('plano gravado: carteira exposta', 'kpi-commercial-risk', eur('780.000'));
+await expectText('plano gravado: carteira exposta', 'kpi-commercial-risk', nb('≈ 780 mil €'));
 await expectText('plano gravado: total', 'kpi-total', eur('7.300')); // EcoVadis 3.500 + âmbito 3 3.800
 await page.getByRole('heading', { name: 'Embalagens Reunião E2E, Lda' }).waitFor();
 log('sessão passou para a empresa criada');
@@ -151,8 +161,12 @@ log('sessão passou para a empresa criada');
 await page.getByLabel('Empresa cliente').selectOption(demoValue);
 await page.getByRole('heading', { name: 'Moldes Exemplo, Lda (demonstração)' }).waitFor();
 await page.getByTestId('kpi-total').waitFor();
-await expectText('KPI carteira exposta', 'kpi-commercial-risk', eur('2.827.500'));
-await expectText('KPI spread', 'kpi-spread', `+10.000${nbsp}€/ano`);
+await expectText('KPI carteira exposta', 'kpi-commercial-risk', nb('≈ 2,8 M €'));
+await expectText('KPI spread', 'kpi-spread', nb('≈ +10 mil €/ano'));
+expectEq('sem múltiplo de «proteção» no ecrã', /protege|proteção \d/.test(await page.locator('main').innerText()), false);
+await page.getByText('De onde vêm os números').click();
+await page.getByText('Faturação comercial em risco: base exposta × peso usado').waitFor();
+log('as contas e os pressupostos estão à vista no plano');
 await expectText('KPI fase 1', 'kpi-phase1', eur('6.300'));
 await expectText('KPI total', 'kpi-total', eur('10.100'));
 await settle();
@@ -243,6 +257,11 @@ await page.getByRole('tab', { name: /Configurador/ }).click();
 await page.emulateMedia({ media: 'print' });
 expectEq('navegação visível na impressão', await page.getByRole('navigation', { name: 'Principal' }).isVisible(), false);
 expectEq('resumo executivo visível na impressão', await page.getByTestId('executive-print-view').isVisible(), true);
+const printed = await page.getByTestId('executive-print-view').innerText();
+expectEq('resumo: explica como ler os números', printed.includes('Como ler estes números'), true);
+expectEq('resumo: NIS2 só se a empresa estiver abrangida', printed.includes('NIS2 (se a empresa estiver abrangida)'), true);
+expectEq('resumo: fases com a janela de dias', printed.includes('Fase 1 · Desbloqueio imediato (0–60 dias)'), true);
+expectEq('resumo: sem múltiplo de «proteção»', /proteção \d|protege/.test(printed), false);
 const pdf = await page.pdf({ format: 'A4', printBackground: true, preferCSSPageSize: true });
 expectEq('páginas do PDF', (pdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) ?? []).length, 1);
 writeFileSync(`${OUT}/resumo-executivo.pdf`, pdf);
@@ -278,6 +297,45 @@ await page.getByText('Ainda não há diagnósticos para esta empresa').waitFor()
 await page.getByRole('link', { name: 'Iniciar Primeiro Stress Test' }).waitFor();
 await page.screenshot({ path: `${OUT}/09-vazio.png` });
 await page.unroute('**/api/v1/assessments', emptyList);
+
+// ── 10b. Utilizadores: convite, link de uso único e desativação ─────────────────────
+await page.goto(BASE + '/utilizadores');
+await page.getByRole('heading', { name: /Utilizadores de Moldes Exemplo/ }).waitFor();
+const invitedEmail = `e2e.${Date.now()}@moldes-exemplo.test`;
+await page.getByRole('button', { name: 'Convidar utilizador' }).first().click();
+await page.getByLabel('Nome').fill('Pessoa Convidada E2E');
+await page.getByLabel('Email').fill(invitedEmail);
+await page.getByRole('button', { name: 'Criar conta e gerar link' }).click();
+await page.getByText('Convite criado para Pessoa Convidada E2E').waitFor();
+const inviteUrl = await page.getByLabel('Link para definir a palavra-passe').inputValue();
+expectEq('convite: token no fragmento do endereço', /\/definir-palavra-passe#token=[\w-]{40,}$/.test(inviteUrl), true);
+await page.getByRole('dialog').getByRole('button', { name: 'Fechar', exact: true }).last().click();
+await page.getByRole('dialog').waitFor({ state: 'detached' });
+
+const guestContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'pt-PT' });
+const guest = await guestContext.newPage();
+await guest.goto(inviteUrl);
+await guest.getByRole('heading', { name: 'Bem-vindo, Pessoa Convidada E2E' }).waitFor();
+await guest.getByLabel('Nova palavra-passe').fill('Frase comprida de fábrica 2026');
+await guest.getByLabel('Repetir a palavra-passe').fill('Frase comprida de fábrica 2026');
+await guest.getByRole('button', { name: 'Definir palavra-passe e entrar' }).click();
+await guest.waitForURL(/\/plano\/[0-9a-f-]{36}$/);
+await guest.getByTestId('kpi-total').waitFor();
+expectEq('convidada entra no plano da sua empresa', await guest.getByRole('heading', { level: 1 }).innerText(), 'Moldes Exemplo, Lda (demonstração)');
+await guest.goto(inviteUrl);
+await guest.reload();
+await guest.getByText('Este link já não é válido').waitFor();
+log('o link de convite só funciona uma vez');
+await guestContext.close();
+
+await page.reload();
+const invitedRow = page.getByRole('row', { name: new RegExp(invitedEmail.replaceAll('.', '\\.')) });
+await invitedRow.getByText('Ativa', { exact: true }).waitFor();
+await invitedRow.getByRole('button', { name: 'Desativar' }).click();
+await invitedRow.getByText('Desativada', { exact: true }).waitFor();
+log('conta de teste desativada');
+await page.goto(planUrl);
+await page.getByTestId('kpi-total').waitFor();
 
 // ── 11. Utilizador da empresa: termos da P4S bloqueados ─────────────────────────────
 await logout();
