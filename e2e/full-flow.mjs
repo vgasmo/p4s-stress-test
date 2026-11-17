@@ -231,6 +231,8 @@ expectEq('sem múltiplo de «proteção» no ecrã', /protege|proteção \d/.tes
 await page.getByText('De onde vêm os números').click();
 await page.getByText('Faturação comercial em risco: base exposta × peso usado').waitFor();
 log('as contas e os pressupostos estão à vista no plano');
+await page.getByText('O que é cada requisito').click();
+expectEq('matriz: os requisitos estão explicados', /usada no setor automóvel[\s\S]*só abrange parte das empresas/.test(await page.getByTestId('requirement-glossary').innerText()), true);
 await expectText('KPI fase 1', 'kpi-phase1', eur('6.300'));
 await expectText('KPI total', 'kpi-total', eur('10.100'));
 await settle();

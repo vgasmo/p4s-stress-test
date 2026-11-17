@@ -14,6 +14,7 @@ import type { ReactNode } from 'react';
 import type { AssessmentDetail, RequirementSnapshot } from '@engine/models/api.types';
 import type { Task, TaskPhase } from '@engine/models/domain';
 import { gapLines, type GapLine } from '@engine/services/plan-coverage';
+import { REQUIREMENTS } from '@engine/services/requirements';
 import { ExecutorBadge } from '@/components/tasks/TaskBadges';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -162,6 +163,7 @@ export function GapMatrix({ assessment, tasks, staff }: GapMatrixProps) {
           );
         })}
       </div>
+      <RequirementGlossary requirements={requirements} />
       <Assumptions assessment={assessment} />
     </Card>
   );
@@ -276,6 +278,32 @@ function GapAnswer(props: GapAnswerProps) {
   );
 }
 
+const DISCLOSURE_SUMMARY =
+  'cursor-pointer select-none px-4 py-2.5 font-medium text-slate-900 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-900';
+
+/** O que é cada requisito, em linguagem de fábrica: quem lê o plano pode não ser quem esteve na reunião. */
+function RequirementGlossary({ requirements }: { requirements: RequirementSnapshot[] }) {
+  const entries = requirements.flatMap((requirement) => {
+    const definition = REQUIREMENTS.find((candidate) => candidate.code === requirement.code);
+    return definition ? [{ code: requirement.code, label: requirement.label, summary: definition.summary }] : [];
+  });
+  if (entries.length === 0) return null;
+
+  return (
+    <details className="group border-t border-slate-200 text-xs text-slate-700" data-testid="requirement-glossary">
+      <summary className={DISCLOSURE_SUMMARY}>O que é cada requisito e o que conta como «já tem»</summary>
+      <dl className="max-w-3xl space-y-2 border-t border-slate-200 bg-slate-50 px-4 py-3">
+        {entries.map((entry) => (
+          <div key={entry.code}>
+            <dt className="font-medium text-slate-900">{entry.label}</dt>
+            <dd className="max-w-prose">{entry.summary}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
+  );
+}
+
 /** As contas por trás dos números, com o que é pressuposto dito às claras. */
 function Assumptions({ assessment }: { assessment: AssessmentDetail }) {
   const { snapshot } = assessment;
@@ -287,9 +315,7 @@ function Assumptions({ assessment }: { assessment: AssessmentDetail }) {
 
   return (
     <details className="group border-t border-slate-200 text-xs text-slate-700">
-      <summary className="cursor-pointer select-none px-4 py-2.5 font-medium text-slate-900 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-900">
-        De onde vêm os números e que pressupostos têm
-      </summary>
+      <summary className={DISCLOSURE_SUMMARY}>De onde vêm os números e que pressupostos têm</summary>
       <div className="space-y-3 border-t border-slate-200 bg-slate-50 px-4 py-3">
         <p className="max-w-prose">
           Os valores em euros da carteira exposta e da penalização bancária são ordens de grandeza. O peso de cada lacuna e
