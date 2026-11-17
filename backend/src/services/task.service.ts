@@ -49,6 +49,13 @@ function assertCompanyUserCanPatch(current: Task, patch: TaskPatch): void {
   }
 }
 
+/** Um entregável da P4S ou do parceiro que entra na proposta tem prazo: é isso que «prazo fechado» quer dizer. */
+function assertProposalDeliverableHasDeadline(task: Pick<TaskFields, 'executorType' | 'includedInProposal' | 'deadline'>): void {
+  if (isPricedExecutor(task.executorType) && task.includedInProposal && task.deadline === null) {
+    throw badRequest('Indique o prazo. Um entregável da P4S ou do parceiro incluído na proposta tem prazo fechado.');
+  }
+}
+
 const toPatch = (input: UpdateTaskInput): TaskPatch => {
   const patch: TaskPatch = {};
   for (const [key, value] of Object.entries(input)) {
@@ -85,6 +92,11 @@ export const taskService = {
     const assessment = await assessmentModel.findById(pool, ctx.companyId, input.assessmentId);
     if (!assessment) throw notFound('Avaliação não encontrada.');
     if (input.assignedUserId) await assertAssignable(pool, ctx.companyId, input.assignedUserId);
+    assertProposalDeliverableHasDeadline({
+      executorType,
+      includedInProposal: input.includedInProposal,
+      deadline: input.deadline ?? null,
+    });
 
     return taskModel.insert(pool, ctx.companyId, assessment.id, {
       title: input.title,
@@ -121,6 +133,10 @@ export const taskService = {
         patch.origin = 'p4s';
       }
       if (patch.assignedUserId) await assertAssignable(client, ctx.companyId, patch.assignedUserId);
+      // Só quando o pedido mexe nos termos: uma tarefa antiga sem prazo continua a poder mudar de estado.
+      if (patch.executorType !== undefined || patch.includedInProposal !== undefined || patch.deadline !== undefined) {
+        assertProposalDeliverableHasDeadline({ ...current, ...patch });
+      }
 
       const updated = await taskModel.update(client, ctx.companyId, id, patch, ctx.userId);
       if (!updated) throw notFound('Tarefa não encontrada.');

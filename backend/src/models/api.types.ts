@@ -221,6 +221,8 @@ export interface AssessmentDetail {
   estimatedSpreadPenalty: number;
   creditLineToRefinance: number;
   conductedBy: string | null;
+  /** Quem gravou o diagnóstico. */
+  conductedByName: string | null;
   completedAt: string | null;
   createdAt: string;
   company: CompanySummary;

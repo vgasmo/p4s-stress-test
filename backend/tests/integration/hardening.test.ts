@@ -3,8 +3,9 @@
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { createApp } from '../../src/app.js';
 import { pool } from '../../src/config/database.js';
-import type { AssessmentListEntry, AuthSession, CreatedAssessment } from '../../src/models/api.types.js';
+import type { AssessmentDetail, AssessmentListEntry, AuthSession, CreatedAssessment } from '../../src/models/api.types.js';
 import type { Task } from '../../src/models/domain.js';
 import { addDays, todayInLisbon } from '../../src/utils/dates.js';
 import {
@@ -252,12 +253,19 @@ describe('cabeçalhos', () => {
     expect(denied.headers['cache-control']).toBe('no-store');
   });
 
-  it('a política de conteúdo não força HTTPS e o HSTS não abrange subdomínios', async () => {
+  it('por omissão o browser é instruído a usar HTTPS, e o HSTS não abrange subdomínios', async () => {
     const response = await request(app).get('/health').expect(200);
     const csp = response.headers['content-security-policy'] as string;
     expect(csp).toMatch(/default-src 'self'/);
-    expect(csp).not.toMatch(/upgrade-insecure-requests/);
+    expect(csp).toMatch(/upgrade-insecure-requests/);
     expect(response.headers['strict-transport-security']).toBe('max-age=15552000');
+  });
+
+  it('com ALLOW_INSECURE_HTTP a aplicação abre por HTTP simples numa rede local', async () => {
+    const response = await request(createApp({ allowInsecureHttp: true })).get('/health').expect(200);
+    const csp = response.headers['content-security-policy'] as string;
+    expect(csp).toMatch(/default-src 'self'/);
+    expect(csp).not.toMatch(/upgrade-insecure-requests/);
   });
 });
 
@@ -388,5 +396,131 @@ describe('diagnósticos sem fotografia do cálculo (rascunhos e versões anterio
       await request(app).post(`/api/v1/assessments/${id}/reissue-proposal`).set(bearer(consultant)).expect(409);
     }
     await request(app).delete(`/api/v1/assessments/${legacyId}`).set(bearer(consultant)).expect(204);
+  });
+});
+
+describe('lacunas e entregáveis do plano', () => {
+  let consultant: AuthSession;
+  let client: AuthSession;
+  let detail: CreatedAssessment;
+  const today = todayInLisbon();
+
+  beforeEach(async () => {
+    consultant = await consultantForA();
+    client = await login('gestor@empresa-a.test');
+    detail = await createAssessment(consultant);
+  });
+
+  it('o diagnóstico diz quem o gravou', async () => {
+    expect(detail.conductedByName).toBe('Consultora P4S');
+    const reopened = await request(app).get(`/api/v1/assessments/${detail.id}`).set(bearer(client)).expect(200);
+    expect((reopened.body as AssessmentDetail).conductedByName).toBe('Consultora P4S');
+  });
+
+  it('a P4S repõe o entregável-tipo de uma lacuna cujo entregável foi eliminado', async () => {
+    const ecovadis = detail.tasks.find((t) => t.requirementCode === 'ecovadis') as Task;
+    await request(app).put(`/api/v1/tasks/${ecovadis.id}`).set(bearer(consultant)).send({ estimatedCost: 2_900 }).expect(200);
+    await request(app).delete(`/api/v1/tasks/${ecovadis.id}`).set(bearer(consultant)).expect(204);
+
+    const restored = await request(app)
+      .post(`/api/v1/assessments/${detail.id}/deliverables/ecovadis/restore`)
+      .set(bearer(consultant));
+    expect(restored.status).toBe(201);
+    // Volta com os termos da fotografia do diagnóstico, não com os que tinham sido negociados.
+    expect(restored.body).toMatchObject({
+      requirementCode: 'ecovadis',
+      origin: 'assessment',
+      title: ecovadis.title,
+      description: ecovadis.description,
+      estimatedCost: 3_500,
+      phase: 'phase_1_urgent',
+      priority: 'critical',
+      executorType: 'p4s',
+      includedInProposal: true,
+      status: 'backlog',
+      deadline: addDays(today, 60),
+      createdBy: fx.consultant.id,
+    });
+
+    const again = await request(app)
+      .post(`/api/v1/assessments/${detail.id}/deliverables/ecovadis/restore`)
+      .set(bearer(consultant));
+    expect(again.status).toBe(409);
+  });
+
+  it('só se repõe o que o diagnóstico deu como lacuna, e só a P4S o faz', async () => {
+    // Âmbitos 1 e 2 estavam conformes nestas respostas: não há entregável para repor.
+    await request(app)
+      .post(`/api/v1/assessments/${detail.id}/deliverables/carbon_scope_1_2/restore`)
+      .set(bearer(consultant))
+      .expect(404);
+    await request(app).post(`/api/v1/assessments/${detail.id}/deliverables/outra_coisa/restore`).set(bearer(consultant)).expect(400);
+    await request(app).post(`/api/v1/assessments/${detail.id}/deliverables/ecovadis/restore`).set(bearer(client)).expect(403);
+    const consultantB = await login('consultora@p4s.test', fx.companyB.id);
+    await request(app).post(`/api/v1/assessments/${detail.id}/deliverables/ecovadis/restore`).set(bearer(consultantB)).expect(404);
+  });
+
+  it('a base de dados não aceita dois entregáveis para a mesma lacuna', async () => {
+    await expect(
+      pool.query(
+        `INSERT INTO tasks (assessment_id, company_id, title, domain, requirement_code, origin)
+         VALUES ($1, $2, 'Duplicado', 'ecovadis', 'ecovadis', 'assessment')`,
+        [detail.id, fx.companyA.id],
+      ),
+    ).rejects.toThrow(/tasks_one_per_requirement/);
+  });
+
+  it('um entregável da P4S incluído na proposta precisa de prazo', async () => {
+    const withoutDeadline = await request(app)
+      .post('/api/v1/tasks')
+      .set(bearer(consultant))
+      .send({ assessmentId: detail.id, title: 'Formação da equipa de qualidade', domain: 'ecovadis', estimatedCost: 900 });
+    expect(withoutDeadline.status).toBe(400);
+    expect(withoutDeadline.body.error.message).toMatch(/prazo/);
+
+    // Fora da proposta, ou a cargo da empresa, o prazo pode ficar por definir.
+    const outside = await request(app)
+      .post('/api/v1/tasks')
+      .set(bearer(consultant))
+      .send({ assessmentId: detail.id, title: 'Formação da equipa de qualidade', domain: 'ecovadis', includedInProposal: false });
+    expect(outside.status).toBe(201);
+    const internal = await request(app)
+      .post('/api/v1/tasks')
+      .set(bearer(client))
+      .send({ assessmentId: detail.id, title: 'Recolher faturas de energia', domain: 'carbon_footprint' });
+    expect(internal.status).toBe(201);
+
+    // Passar a incluir, ou passar para a P4S, sem prazo é recusado. Com prazo passa.
+    await request(app).put(`/api/v1/tasks/${outside.body.id}`).set(bearer(consultant)).send({ includedInProposal: true }).expect(400);
+    await request(app).put(`/api/v1/tasks/${internal.body.id}`).set(bearer(consultant)).send({ executorType: 'p4s' }).expect(400);
+    await request(app)
+      .put(`/api/v1/tasks/${outside.body.id}`)
+      .set(bearer(consultant))
+      .send({ includedInProposal: true, deadline: addDays(today, 45) })
+      .expect(200);
+    // E não se tira o prazo a um entregável da proposta.
+    const ecovadis = detail.tasks.find((t) => t.requirementCode === 'ecovadis') as Task;
+    await request(app).put(`/api/v1/tasks/${ecovadis.id}`).set(bearer(consultant)).send({ deadline: null }).expect(400);
+  });
+
+  it('uma tarefa antiga sem prazo continua a poder mudar de estado', async () => {
+    const legacy = await pool.query<{ id: string }>(
+      `INSERT INTO tasks (assessment_id, company_id, title, domain, executor_type, origin)
+       VALUES ($1, $2, 'Entregável antigo sem prazo', 'ecovadis', 'p4s', 'p4s') RETURNING id`,
+      [detail.id, fx.companyA.id],
+    );
+    await request(app).put(`/api/v1/tasks/${legacy.rows[0]?.id}`).set(bearer(client)).send({ status: 'in_progress' }).expect(200);
+  });
+
+  it('a ficha da empresa acompanha o setor e a faturação do último diagnóstico', async () => {
+    await createAssessment(consultant, { ...AUTOMOTIVE_ANSWERS, sectorProfile: 'heavy_process', annualRevenue: 8_250_000 });
+    const company = await request(app).get(`/api/v1/companies/${fx.companyA.id}`).set(bearer(consultant)).expect(200);
+    expect(company.body).toMatchObject({ sectorProfile: 'heavy_process', annualRevenue: 8_250_000, name: fx.companyA.name });
+  });
+});
+
+describe('aplicação servida no mesmo processo', () => {
+  it('o estado de saúde reflete a base de dados', async () => {
+    await request(app).get('/health').expect(200, { status: 'ok' });
   });
 });

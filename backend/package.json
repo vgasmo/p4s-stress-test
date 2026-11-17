@@ -9,6 +9,8 @@
     "typecheck": "tsc --noEmit",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx db/seeds/demo.seed.ts",
+    "db:migrate:prod": "node dist/scripts/migrate.js",
+    "db:seed:prod": "node dist/db/seeds/demo.seed.js",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit"
   },

@@ -207,6 +207,20 @@ export const taskModel = {
     return rows[0] ? toTask(rows[0]) : null;
   },
 
+  /** Entregável que responde a uma lacuna do diagnóstico (há no máximo um). */
+  async findByRequirement(
+    db: Queryable,
+    companyId: string,
+    assessmentId: string,
+    requirementCode: RequirementCode,
+  ): Promise<Task | null> {
+    const { rows } = await db.query<TaskRow>(
+      `SELECT ${COLUMNS} FROM tasks WHERE company_id = $1 AND assessment_id = $2 AND requirement_code = $3`,
+      [companyId, assessmentId, requirementCode],
+    );
+    return rows[0] ? toTask(rows[0]) : null;
+  },
+
   async update(
     db: Queryable,
     companyId: string,

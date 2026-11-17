@@ -89,6 +89,16 @@ export const assessmentModel = {
     return rows[0] ? toAssessment(rows[0]) : null;
   },
 
+  /** Nome de quem gravou o diagnóstico, para o identificar no plano e no histórico. */
+  async conductedByName(db: Queryable, companyId: string, id: string): Promise<string | null> {
+    const { rows } = await db.query<{ full_name: string | null }>(
+      `SELECT u.full_name FROM assessments a LEFT JOIN users u ON u.id = a.conducted_by
+       WHERE a.company_id = $1 AND a.id = $2`,
+      [companyId, id],
+    );
+    return rows[0]?.full_name ?? null;
+  },
+
   /** A proposta passa a contar como emitida agora. */
   async markProposalIssued(db: Queryable, companyId: string, id: string): Promise<Assessment | null> {
     const { rows } = await db.query<AssessmentRow>(

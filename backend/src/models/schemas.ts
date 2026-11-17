@@ -47,6 +47,12 @@ const sectorProfile = z.enum(SECTOR_PROFILES);
 
 export const idParamsSchema = z.object({ id });
 
+/** Lacuna de um diagnóstico: /assessments/:id/deliverables/:code */
+export const deliverableParamsSchema = z.object({
+  id,
+  code: z.enum(['ecovadis', 'carbon_scope_1_2', 'carbon_scope_3', 'banking_esg', 'information_security']),
+});
+
 // Auth
 
 export const loginSchema = z.strictObject({

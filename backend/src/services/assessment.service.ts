@@ -28,10 +28,11 @@ import type { CreateAssessmentInput, QuickCompanyInput, SimulateAssessmentInput 
 import { taskModel, type NewTask } from '../models/task.model.js';
 import { addDays, daysBetween, todayInLisbon } from '../utils/dates.js';
 import { AppError, companyScopeRequired, forbidden, notFound } from '../utils/errors.js';
+import { conflict } from '../utils/errors.js';
 import { CATALOG } from './catalog.private.js';
 import { toPublicSimulation } from './public-simulation.js';
 import { summarizeRemediation } from './remediation-summary.js';
-import { describeSources, type StressTestInput } from './requirements.js';
+import { describeSources, type RequirementCode, type StressTestInput } from './requirements.js';
 import { StressTestCalculatorService, type StressTestResult } from './stress-test-calculator.service.js';
 import { TaskGeneratorService, type GeneratedTaskDraft } from './task-generator.service.js';
 
@@ -154,6 +155,7 @@ function buildDetail(
   snapshot: AssessmentSnapshot,
   company: Company,
   tasks: Task[],
+  conductedByName: string | null,
 ): AssessmentDetail {
   return {
     id: assessment.id,
@@ -164,6 +166,7 @@ function buildDetail(
     estimatedSpreadPenalty: assessment.estimatedSpreadPenalty,
     creditLineToRefinance: assessment.creditLineToRefinance,
     conductedBy: assessment.conductedBy,
+    conductedByName,
     completedAt: assessment.completedAt,
     createdAt: assessment.createdAt,
     company: toCompanySummary(company),
@@ -227,7 +230,9 @@ export const assessmentService = {
   async create(auth: AuthUser, payload: CreateAssessmentInput): Promise<CreatedAssessment> {
     assertStaff(auth.role, 'Só a equipa P4S grava diagnósticos. Peça um novo diagnóstico ao seu consultor.');
     return withTransaction(async (client) => {
-      const { company, resolution } = await resolveCompany(client, auth, payload.company, payload);
+      const resolved = await resolveCompany(client, auth, payload.company, payload);
+      const { resolution } = resolved;
+      let { company } = resolved;
 
       const input: StressTestInput = {
         sectorProfile: payload.sectorProfile ?? company.sectorProfile,
@@ -242,6 +247,15 @@ export const assessmentService = {
       };
       const result = calculator.calculate(input);
       const baseDate = todayInLisbon();
+
+      // A ficha da empresa acompanha o último diagnóstico: é dela que parte o seguinte.
+      if (input.sectorProfile !== company.sectorProfile || input.annualRevenue !== company.annualRevenue) {
+        company =
+          (await companyModel.update(client, company.id, {
+            sectorProfile: input.sectorProfile,
+            annualRevenue: input.annualRevenue,
+          })) ?? company;
+      }
 
       const snapshot: AssessmentSnapshot = {
         engineVersion: result.catalogVersion,
@@ -271,7 +285,8 @@ export const assessmentService = {
       await taskModel.insertBatch(client, company.id, assessment.id, drafts);
       const tasks = await taskModel.list(client, company.id, { assessmentId: assessment.id });
 
-      return { ...buildDetail(assessment, snapshot, company, tasks), companyResolution: resolution };
+      const author = await assessmentModel.conductedByName(client, company.id, assessment.id);
+      return { ...buildDetail(assessment, snapshot, company, tasks, author), companyResolution: resolution };
     });
   },
 
@@ -283,7 +298,46 @@ export const assessmentService = {
     const company = await companyModel.findById(pool, ctx.companyId);
     if (!company) throw notFound('Empresa não encontrada.');
     const tasks = await taskModel.list(pool, ctx.companyId, { assessmentId: assessment.id });
-    return buildDetail(assessment, snapshot, company, tasks);
+    const author = await assessmentModel.conductedByName(pool, ctx.companyId, assessment.id);
+    return buildDetail(assessment, snapshot, company, tasks, author);
+  },
+
+  /**
+   * Repõe o entregável-tipo de uma lacuna que ficou sem resposta no plano (foi eliminado),
+   * com os termos da fotografia do diagnóstico. O prazo conta da data de emissão da proposta.
+   */
+  async restoreDeliverable(ctx: TenantContext, id: string, code: RequirementCode): Promise<Task> {
+    assertStaff(ctx.role, 'Só a equipa P4S repõe entregáveis.');
+    return withTransaction(async (client) => {
+      const assessment = await assessmentModel.findById(client, ctx.companyId, id, { forUpdate: true });
+      if (!assessment) throw notFound('Avaliação não encontrada.');
+      const snapshot = readSnapshot(assessment);
+      if (!snapshot) throw notOpenable();
+      const requirement = snapshot.requirements.find((entry) => entry.code === code && entry.status === 'gap');
+      if (!requirement) throw notFound('Este diagnóstico não tem essa lacuna.');
+      if (await taskModel.findByRequirement(client, ctx.companyId, id, code)) {
+        throw conflict('O entregável desta lacuna já está no plano.');
+      }
+
+      const { solution } = requirement;
+      const template = CATALOG.parameters[code].task;
+      return taskModel.insert(client, ctx.companyId, id, {
+        title: solution.title,
+        description: template.description,
+        domain: template.domain,
+        priority: solution.priority,
+        status: 'backlog',
+        executorType: solution.executorType,
+        phase: solution.phase,
+        includedInProposal: true,
+        estimatedCost: solution.estimatedCost,
+        deadline: addDays(proposalInfo(assessment).issuedOn, solution.deadlineDays),
+        assignedUserId: null,
+        requirementCode: code,
+        origin: 'assessment',
+        createdBy: ctx.userId,
+      });
+    });
   },
 
   /**
@@ -306,7 +360,8 @@ export const assessmentService = {
       if (shift > 0) await taskModel.shiftPendingDeliverables(client, ctx.companyId, id, shift);
 
       const tasks = await taskModel.list(client, ctx.companyId, { assessmentId: id });
-      return buildDetail(reissued, snapshot, company, tasks);
+      const author = await assessmentModel.conductedByName(client, ctx.companyId, id);
+      return buildDetail(reissued, snapshot, company, tasks, author);
     });
   },
 

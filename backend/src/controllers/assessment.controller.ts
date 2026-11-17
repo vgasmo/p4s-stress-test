@@ -3,6 +3,7 @@ import { getAuth, getTenant } from '../middlewares/auth.middleware.js';
 import { validated } from '../middlewares/validate.middleware.js';
 import { isStaffRole } from '../models/domain.js';
 import type { CreateAssessmentInput, SimulateAssessmentInput } from '../models/schemas.js';
+import type { RequirementCode } from '../services/requirements.js';
 import { assessmentService } from '../services/assessment.service.js';
 
 export const assessmentController = {
@@ -29,6 +30,12 @@ export const assessmentController = {
   async reissueProposal(req: Request, res: Response): Promise<void> {
     const { id } = validated<{ id: string }>(req, 'params');
     res.json(await assessmentService.reissueProposal(getTenant(req), id));
+  },
+
+  async restoreDeliverable(req: Request, res: Response): Promise<void> {
+    const { id, code } = validated<{ id: string; code: RequirementCode }>(req, 'params');
+    const task = await assessmentService.restoreDeliverable(getTenant(req), id, code);
+    res.status(201).location(`/api/v1/tasks/${task.id}`).json(task);
   },
 
   async remove(req: Request, res: Response): Promise<void> {

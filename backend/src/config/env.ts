@@ -25,6 +25,15 @@ const envSchema = z
     BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(12),
     /** Número de proxies à frente da API (0 = ligação direta). */
     TRUST_PROXY: z.coerce.number().int().min(0).default(0),
+    /**
+     * Permite usar a aplicação por HTTP simples fora do próprio computador (rede local, sem
+     * certificado). Desligado por omissão: sem HTTPS, a palavra-passe e a sessão passam em
+     * claro na rede, por isso o browser é instruído a pedir tudo por HTTPS.
+     */
+    ALLOW_INSECURE_HTTP: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((value) => value === 'true'),
     /** Pasta do frontend compilado (frontend/dist). Vazio: a API não serve ficheiros. */
     STATIC_DIR: z
       .string()

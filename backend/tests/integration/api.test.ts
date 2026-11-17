@@ -559,8 +559,8 @@ describe('RBAC das tarefas', () => {
     const assumed = await request(app)
       .put(`/api/v1/tasks/${created.body.id}`)
       .set(bearer(consultantA))
-      .send({ executorType: 'p4s', estimatedCost: 2_900 });
-    expect(assumed.body).toMatchObject({ executorType: 'p4s', estimatedCost: 2_900, origin: 'p4s' });
+      .send({ executorType: 'p4s', estimatedCost: 2_900, deadline: '2027-02-15' });
+    expect(assumed.body).toMatchObject({ executorType: 'p4s', estimatedCost: 2_900, deadline: '2027-02-15', origin: 'p4s' });
 
     await request(app).put(`/api/v1/tasks/${created.body.id}`).set(bearer(sessionA)).send({ estimatedCost: 500 }).expect(403);
     await request(app).put(`/api/v1/tasks/${created.body.id}`).set(bearer(sessionA)).send({ status: 'in_progress' }).expect(200);

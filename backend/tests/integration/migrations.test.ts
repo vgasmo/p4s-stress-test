@@ -60,7 +60,10 @@ describe('migração 005 sobre dados da versão anterior', () => {
     await insertTask('Recolher faturas de energia', null, 'internal');
     await insertTask('Workshop extra', 'Sessão de trabalho com a direção.', 'p4s');
 
-    expect(await runMigrations(pool)).toEqual(['005_task_origin_and_proposal_issue.sql']);
+    expect(await runMigrations(pool)).toEqual([
+      '005_task_origin_and_proposal_issue.sql',
+      '006_one_deliverable_per_requirement.sql',
+    ]);
 
     const tasks = await pool.query<{ title: string; requirement_code: string | null; origin: string; description: string | null }>(
       'SELECT title, requirement_code, origin, description FROM tasks ORDER BY title',

@@ -9,6 +9,16 @@ import type pg from 'pg';
 
 export const MIGRATIONS_DIR = path.resolve(process.env.MIGRATIONS_DIR ?? path.join(process.cwd(), 'db', 'migrations'));
 
+/** Migrações que existem em disco e ainda não foram aplicadas a esta base de dados. */
+export async function pendingMigrations(pool: pg.Pool, dir: string = MIGRATIONS_DIR): Promise<string[]> {
+  const files = (await readdir(dir)).filter((file) => /^\d+_.+\.sql$/.test(file)).sort();
+  const { rows } = await pool.query<{ exists: boolean }>(`SELECT to_regclass('schema_migrations') IS NOT NULL AS exists`);
+  if (!rows[0]?.exists) return files;
+  const applied = await pool.query<{ filename: string }>('SELECT filename FROM schema_migrations');
+  const done = new Set(applied.rows.map((row) => row.filename));
+  return files.filter((file) => !done.has(file));
+}
+
 export async function runMigrations(pool: pg.Pool, dir: string = MIGRATIONS_DIR): Promise<string[]> {
   await pool.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
     filename TEXT PRIMARY KEY,

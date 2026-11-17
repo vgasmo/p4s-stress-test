@@ -1,6 +1,7 @@
 import path from 'node:path';
 import express, { type Express, type RequestHandler } from 'express';
 import helmet from 'helmet';
+import { pool } from './config/database.js';
 import { env } from './config/env.js';
 import { errorHandler, notFoundHandler } from './middlewares/error.middleware.js';
 import { apiRouter } from './routes/index.js';
@@ -25,7 +26,13 @@ function proxyMisconfigurationWarning(): RequestHandler {
   };
 }
 
-export function createApp(): Express {
+export interface AppOptions {
+  /** Por omissão vem de ALLOW_INSECURE_HTTP. */
+  allowInsecureHttp?: boolean;
+}
+
+export function createApp(options: AppOptions = {}): Express {
+  const allowInsecureHttp = options.allowInsecureHttp ?? env.ALLOW_INSECURE_HTTP;
   const app = express();
 
   app.disable('x-powered-by');
@@ -35,10 +42,10 @@ export function createApp(): Express {
   app.use(
     helmet({
       contentSecurityPolicy: {
-        // Sem upgrade-insecure-requests: servida por HTTP na rede local (o portátil do consultor
-        // aberto noutro computador da sala), a página ficava em branco porque o browser pedia
-        // os ficheiros por HTTPS. A aplicação não carrega nada de fora, por isso não faz falta.
-        directives: { upgradeInsecureRequests: null },
+        // Por omissão o browser pede tudo por HTTPS (upgrade-insecure-requests): fora do próprio
+        // computador a aplicação só abre por HTTPS, para a palavra-passe e a sessão nunca irem
+        // em claro. Quem precisar mesmo de HTTP numa rede local liga ALLOW_INSECURE_HTTP.
+        directives: allowInsecureHttp ? { upgradeInsecureRequests: null } : {},
       },
       // Só o próprio domínio: includeSubDomains obrigava todos os subdomínios a HTTPS durante meses.
       strictTransportSecurity: { maxAge: 15_552_000, includeSubDomains: false },
@@ -46,8 +53,14 @@ export function createApp(): Express {
   );
   app.use(express.json({ limit: '100kb' }));
 
-  app.get('/health', (_req, res) => {
-    res.json({ status: 'ok' });
+  // Só responde «ok» se a base de dados também responder.
+  app.get('/health', async (_req, res) => {
+    try {
+      await pool.query('SELECT 1');
+      res.json({ status: 'ok' });
+    } catch {
+      res.status(503).json({ status: 'unavailable' });
+    }
   });
 
   // As respostas da API levam dados de clientes: não ficam na cache do browser nem de proxies.
@@ -64,7 +77,8 @@ export function createApp(): Express {
     app.use((req, res, next) => {
       // As rotas da app (/, /plano/…) são resolvidas no browser; a API responde 404 em JSON.
       const pageRequest = req.method === 'GET' || req.method === 'HEAD';
-      if (!pageRequest || req.path.startsWith('/api/')) return next();
+      // Um ficheiro que não existe (/assets/x.js) é um 404, não a página da aplicação.
+      if (!pageRequest || req.path.startsWith('/api/') || path.extname(req.path) !== '') return next();
       res.set('Cache-Control', 'no-cache').sendFile(path.join(staticDir, 'index.html'));
     });
   }

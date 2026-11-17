@@ -4,7 +4,12 @@ import { authenticate, authenticateOptional, requireCompanyScope } from '../midd
 import { simulateLimiter } from '../middlewares/rate-limit.middleware.js';
 import { requireStaff } from '../middlewares/role.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { createAssessmentSchema, idParamsSchema, simulateAssessmentSchema } from '../models/schemas.js';
+import {
+  createAssessmentSchema,
+  deliverableParamsSchema,
+  idParamsSchema,
+  simulateAssessmentSchema,
+} from '../models/schemas.js';
 
 export function assessmentRoutes(): Router {
   const router = Router();
@@ -30,6 +35,14 @@ export function assessmentRoutes(): Router {
     requireCompanyScope,
     validate({ params: idParamsSchema }),
     assessmentController.reissueProposal,
+  );
+  // Repõe o entregável-tipo de uma lacuna que ficou sem resposta no plano.
+  router.post(
+    '/:id/deliverables/:code/restore',
+    requireStaff,
+    requireCompanyScope,
+    validate({ params: deliverableParamsSchema }),
+    assessmentController.restoreDeliverable,
   );
   router.delete(
     '/:id',
