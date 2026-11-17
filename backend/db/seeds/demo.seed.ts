@@ -10,12 +10,7 @@ import { userModel } from '../../src/models/user.model.js';
 import { assessmentService } from '../../src/services/assessment.service.js';
 import { hashPassword } from '../../src/services/auth.service.js';
 import { formatEUR } from '../../src/utils/currency.js';
-
-/** NIF com dígito de controlo válido a partir de 8 dígitos. */
-function nifFrom(prefix: string): string {
-  const sum = [...prefix].reduce((acc, digit, index) => acc + Number(digit) * (9 - index), 0) % 11;
-  return `${prefix}${sum < 2 ? 0 : 11 - sum}`;
-}
+import { nifWithCheckDigit as nifFrom } from '../../src/utils/validation.js';
 
 const generatedPassword = () => randomBytes(12).toString('base64url');
 

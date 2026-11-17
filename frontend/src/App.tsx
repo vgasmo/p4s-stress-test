@@ -1,5 +1,6 @@
+import { useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
-import type { ReactNode } from 'react';
 import { AppShell } from '@/components/layout/AppShell';
 import { ErrorBoundary } from '@/components/layout/ErrorBoundary';
 import { useSession } from '@/lib/session';
@@ -16,9 +17,25 @@ function RequireSession({ children }: { children: ReactNode }) {
   return children;
 }
 
+/**
+ * Quando a pessoa com sessão muda sem passar pelo login deste separador (entrou ou saiu
+ * noutro separador), os dados em memória são de quem lá estava antes: deitam-se fora.
+ */
+function useClearCacheWhenUserChanges(): void {
+  const queryClient = useQueryClient();
+  const userId = useSession()?.user.id ?? null;
+  const previous = useRef(userId);
+  useEffect(() => {
+    if (previous.current === userId) return;
+    previous.current = userId;
+    queryClient.clear();
+  }, [userId, queryClient]);
+}
+
 /** Cada ecrã dentro da sua própria barreira: um erro num deles não apaga a moldura nem os outros. */
 function Screen() {
   const location = useLocation();
+  useClearCacheWhenUserChanges();
   return (
     <ErrorBoundary resetKey={location.pathname}>
       <Outlet />

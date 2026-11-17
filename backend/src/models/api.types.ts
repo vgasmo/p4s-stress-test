@@ -25,6 +25,15 @@ export interface ApiErrorBody {
   error: { code: string; message: string; details?: unknown };
 }
 
+// ── Informação pública ──────────────────────────────────────────────────────────────
+
+/** O que a P4S configurou para mostrar a toda a gente: contacto e condições da proposta. */
+export interface PublicInfo {
+  contactEmail: string | null;
+  legalIdentity: string | null;
+  proposalTerms: string[];
+}
+
 // ── Sessão ──────────────────────────────────────────────────────────────────────────
 
 export interface AuthSession {

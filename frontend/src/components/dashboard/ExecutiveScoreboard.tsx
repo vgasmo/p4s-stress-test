@@ -52,10 +52,12 @@ export function ExecutiveScoreboard({ assessment, tasks }: ExecutiveScoreboardPr
         valueClass={assessment.commercialRevenueAtRisk > 0 ? 'text-rose-700' : 'text-slate-900'}
         testId="kpi-commercial-risk"
         badge={
-          // Só quando o bloqueio mudou o resultado: de outra forma são dois números lado a lado sem relação.
-          snapshot.dealbreaker?.raisedWeight ? (
+          // O mínimo só aparece quando mudou o resultado: de outra forma são dois números lado a lado sem relação.
+          snapshot.dealbreaker ? (
             <Badge tone="critical" title={snapshot.dealbreaker.reason}>
-              Bloqueio setorial: mínimo de {snapshot.dealbreaker.floorPoints}% da base
+              {snapshot.dealbreaker.raisedWeight
+                ? `Bloqueio setorial: mínimo de ${snapshot.dealbreaker.floorPoints}% da base`
+                : 'Bloqueio setorial'}
             </Badge>
           ) : null
         }

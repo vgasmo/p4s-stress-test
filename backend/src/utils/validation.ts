@@ -12,6 +12,13 @@ export function isValidNif(value: string): boolean {
   return check === digits[8];
 }
 
+/** NIF com dígito de controlo válido a partir dos 8 primeiros dígitos (dados de demonstração e testes). */
+export function nifWithCheckDigit(prefix: string): string {
+  if (!/^\d{8}$/.test(prefix)) throw new RangeError('O prefixo do NIF tem de ter 8 dígitos.');
+  const remainder = [...prefix].reduce((acc, digit, index) => acc + Number(digit) * (9 - index), 0) % 11;
+  return `${prefix}${remainder < 2 ? 0 : 11 - remainder}`;
+}
+
 /** CAE (Rev. 3/Rev. 4): subclasse de 5 dígitos. */
 export function isValidCae(value: string): boolean {
   return /^\d{5}$/.test(value);

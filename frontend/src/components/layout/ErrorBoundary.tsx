@@ -1,6 +1,7 @@
 import { AlertTriangle } from 'lucide-react';
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
+import { clearLocalData } from '@/lib/session';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -44,12 +45,23 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               Os seus dados não foram alterados. Volte ao início ou recarregue a página. Se voltar a acontecer, avise a
               equipa Plan4Sustain.
             </p>
-            <div className="mt-3 flex gap-2">
+            <div className="mt-3 flex flex-wrap gap-2">
               <Button size="sm" onClick={() => window.location.assign('/')}>
                 Voltar ao início
               </Button>
               <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
                 Recarregar
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                title="Apaga a sessão e os rascunhos guardados neste browser. Os dados gravados no servidor não são afetados."
+                onClick={() => {
+                  clearLocalData();
+                  window.location.assign('/entrar');
+                }}
+              >
+                Terminar sessão e limpar dados locais
               </Button>
             </div>
           </div>

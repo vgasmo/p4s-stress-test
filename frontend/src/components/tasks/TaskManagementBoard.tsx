@@ -18,6 +18,7 @@ import { useAssignableUsers } from '@/hooks/useAuth';
 import { useUpdateTask } from '@/hooks/useTasks';
 import { errorMessage } from '@/lib/api';
 import { isStaffSession, useSession } from '@/lib/session';
+import { readStorage, writeStorage } from '@/lib/utils';
 import { ExecutionKanban } from './ExecutionKanban';
 import { ProposalConfigurator } from './ProposalConfigurator';
 import { EMPTY_FILTERS, TaskFilterBar, applyTaskFilters, hasActiveFilters, type TaskFilters } from './TaskFilterBar';
@@ -26,6 +27,21 @@ import { TaskSheetForm } from './TaskSheetForm';
 interface TaskManagementBoardProps {
   assessment: AssessmentDetail;
   tasksQuery: UseQueryResult<Task[], Error>;
+}
+
+type PlanTab = 'proposal' | 'execution';
+const TAB_KEY = 'p4s.plan-tab';
+
+/**
+ * Separador com que o plano abre: o último que a pessoa usou. Na primeira vez, a conta de
+ * uma empresa num ecrã estreito abre no acompanhamento, onde o estado, o prazo e os
+ * honorários de cada tarefa cabem no ecrã (a tabela da proposta obriga a deslizar para o lado).
+ */
+function initialTab(staff: boolean): PlanTab {
+  const remembered = readStorage<string>('local', TAB_KEY);
+  if (remembered === 'proposal' || remembered === 'execution') return remembered;
+  const narrow = typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches;
+  return !staff && narrow ? 'execution' : 'proposal';
 }
 
 interface FailedPatch {
@@ -40,6 +56,12 @@ export function TaskManagementBoard({ assessment, tasksQuery }: TaskManagementBo
   const update = useUpdateTask(assessment.id);
   const [filters, setFilters] = useState<TaskFilters>(EMPTY_FILTERS);
   const [sheet, setSheet] = useState<{ open: boolean; task: Task | null }>({ open: false, task: null });
+  const [tab, setTab] = useState<PlanTab>(() => initialTab(staff));
+  const chooseTab = (value: string) => {
+    if (value !== 'proposal' && value !== 'execution') return;
+    setTab(value);
+    writeStorage('local', TAB_KEY, value);
+  };
   const [failed, setFailed] = useState<FailedPatch | null>(null);
   const today = todayInLisbon();
 
@@ -113,7 +135,7 @@ export function TaskManagementBoard({ assessment, tasksQuery }: TaskManagementBo
             }
           />
         ) : (
-          <Tabs defaultValue="proposal">
+          <Tabs value={tab} onValueChange={chooseTab}>
             <TabsList>
               <TabsTrigger value="proposal">
                 <Rows3 aria-hidden />

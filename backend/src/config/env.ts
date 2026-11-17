@@ -34,6 +34,32 @@ const envSchema = z
       .enum(['true', 'false'])
       .default('false')
       .transform((value) => value === 'true'),
+    /** Email de contacto da P4S, mostrado a quem ainda não tem conta. Vazio: não aparece. */
+    P4S_CONTACT_EMAIL: z
+      .string()
+      .optional()
+      .transform((value) => value?.trim() || undefined)
+      .pipe(z.email('P4S_CONTACT_EMAIL não é um email válido.').optional()),
+    /** Identificação de quem emite a proposta (denominação, NIF, morada), impressa no resumo. */
+    P4S_LEGAL_IDENTITY: z
+      .string()
+      .max(300, 'P4S_LEGAL_IDENTITY: máximo 300 caracteres.')
+      .optional()
+      .transform((value) => value?.trim() || undefined),
+    /**
+     * Condições da proposta impressas no resumo (IVA, pagamento, quem é o parceiro), uma por
+     * linha separadas por «|». São texto da P4S: a aplicação não as inventa.
+     */
+    P4S_PROPOSAL_TERMS: z
+      .string()
+      .max(900, 'P4S_PROPOSAL_TERMS: máximo 900 caracteres.')
+      .optional()
+      .transform((value) =>
+        (value ?? '')
+          .split('|')
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0),
+      ),
     /** Pasta do frontend compilado (frontend/dist). Vazio: a API não serve ficheiros. */
     STATIC_DIR: z
       .string()

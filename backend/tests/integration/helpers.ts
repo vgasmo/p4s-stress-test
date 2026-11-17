@@ -7,15 +7,13 @@ import type { AuthSession } from '../../src/models/api.types.js';
 import { companyModel } from '../../src/models/company.model.js';
 import type { Company, User } from '../../src/models/domain.js';
 import { userModel } from '../../src/models/user.model.js';
+import { nifWithCheckDigit } from '../../src/utils/validation.js';
 
 export const app = createApp();
 export const PASSWORD = 'Palavra-passe-de-teste-123';
 
 /** NIF válido a partir de 8 dígitos. */
-export function nifFrom(prefix: string): string {
-  const sum = [...prefix].reduce((acc, digit, index) => acc + Number(digit) * (9 - index), 0) % 11;
-  return `${prefix}${sum < 2 ? 0 : 11 - sum}`;
-}
+export const nifFrom = nifWithCheckDigit;
 
 /** Recria o schema do zero. Só corre em bases de dados cujo nome termina em «_test». */
 export async function resetDatabase(): Promise<void> {

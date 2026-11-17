@@ -7,6 +7,7 @@ import type { Task, TaskPhase } from '@engine/models/domain';
 import { gapLines, type GapLine } from '@engine/services/plan-coverage';
 import { countsTowardsProposal, summarizeRemediation } from '@engine/services/remediation-summary';
 import { FOOTER_SIGNATURE, Wordmark } from '@/components/layout/AppShell';
+import { usePublicInfo } from '@/hooks/usePublicInfo';
 import {
   EXECUTOR_SHORT_LABELS,
   formatApproxEUR,
@@ -22,6 +23,8 @@ import {
 } from '@/lib/formatters';
 
 const PHASES: TaskPhase[] = ['phase_1_urgent', 'phase_2_structural'];
+/** Até este número de linhas, o âmbito de cada entregável cabe na página única. */
+const MAX_ROWS_WITH_SCOPE = 6;
 
 export function ExecutivePrintView({ assessment, tasks }: { assessment: AssessmentDetail; tasks: Task[] }) {
   const { company, snapshot } = assessment;
@@ -30,6 +33,10 @@ export function ExecutivePrintView({ assessment, tasks }: { assessment: Assessme
   // Cada lacuna com o que o plano lhe responde hoje, para o resumo dizer o mesmo que o configurador.
   const gaps = gapLines(snapshot, tasks);
   const hasProposal = tasks.some(countsTowardsProposal);
+  const showScope = included.length <= MAX_ROWS_WITH_SCOPE;
+  // Identificação de quem emite e condições da proposta: texto da P4S, configurado no servidor.
+  const { legalIdentity, proposalTerms } = usePublicInfo();
+  const reference = assessment.id.slice(0, 8).toUpperCase();
   // Datas guardadas no servidor: imprimir mais tarde não muda a data de emissão nem a validade.
   const { issuedOn, validUntil, validityDays, expired } = assessment.proposal;
 
@@ -42,8 +49,10 @@ export function ExecutivePrintView({ assessment, tasks }: { assessment: Assessme
             <Wordmark className="text-[13px]" />
             <p className="mt-0.5 text-[9px] text-slate-700">Conformidade documental para a cadeia de fornecimento</p>
           </div>
-          <p className="text-right text-[9px] text-slate-700">
-            Emitido em <span className="font-mono tabular-nums">{formatDatePt(issuedOn)}</span>
+          <p className="text-right text-[9px] text-slate-700" data-testid="print-reference">
+            Emitido em <span className="font-mono tabular-nums">{formatDatePt(issuedOn)}</span> · Ref.{' '}
+            <span className="font-mono tabular-nums">{reference}</span>
+            {assessment.conductedByName && <span className="block">Diagnóstico conduzido por {assessment.conductedByName}</span>}
           </p>
         </header>
 
@@ -158,7 +167,13 @@ export function ExecutivePrintView({ assessment, tasks }: { assessment: Assessme
                   ) : (
                     rows.map((task) => (
                       <tr key={task.id} className="border-b border-slate-200">
-                        <td className="py-1.5 pr-2">{task.title}</td>
+                        <td className="py-1.5 pr-2">
+                          {task.title}
+                          {/* O que o entregável inclui, para quem assina saber o que está a aceitar. */}
+                          {showScope && countsTowardsProposal(task) && task.description && (
+                            <span className="block text-[8.5px] leading-snug text-slate-700">{task.description}</span>
+                          )}
+                        </td>
                         <td className="py-1.5 pr-2">{EXECUTOR_SHORT_LABELS[task.executorType]}</td>
                         <td className="py-1.5 pr-2 text-right font-mono tabular-nums">{formatDatePt(task.deadline)}</td>
                         <td className="py-1.5 text-right font-mono tabular-nums">
@@ -221,6 +236,13 @@ export function ExecutivePrintView({ assessment, tasks }: { assessment: Assessme
                 Prazos calculados para adjudicação na data de emissão. Se a adjudicação for posterior, deslizam o mesmo
                 número de dias.
               </p>
+              {proposalTerms.length > 0 && (
+                <ul className="mt-1 space-y-0.5 text-[9px] text-slate-700" data-testid="proposal-terms">
+                  {proposalTerms.map((term) => (
+                    <li key={term}>{term}</li>
+                  ))}
+                </ul>
+              )}
               <div className="mt-5 grid grid-cols-2 gap-6 text-[9px] text-slate-700">
                 <Signature label={`Aceite por ${company.name}`} />
                 <Signature label="Plan4Sustain" />
@@ -228,6 +250,7 @@ export function ExecutivePrintView({ assessment, tasks }: { assessment: Assessme
             </>
           )}
           <p className="mt-3 text-[8.5px] text-slate-700">{FOOTER_SIGNATURE}</p>
+          {legalIdentity && <p className="mt-0.5 text-[8.5px] text-slate-700">{legalIdentity}</p>}
         </footer>
       </article>
     </div>,
@@ -268,6 +291,7 @@ function Signature({ label }: { label: string }) {
     <div>
       <div className="h-6 border-b border-slate-500" />
       <p className="mt-1">{label} · Data ____/____/______</p>
+      <p className="mt-2">Nome e cargo ________________________________</p>
     </div>
   );
 }

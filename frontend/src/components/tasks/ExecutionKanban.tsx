@@ -96,7 +96,8 @@ export function ExecutionKanban({ tasks, today, assigneeNames, onStatusChange, o
                     <Select
                       aria-label={`Mover «${task.title}»`}
                       containerClassName="mt-2"
-                      className="h-7 text-xs"
+                      // Em ecrãs de toque o seletor tem altura para o dedo.
+                      className="h-11 text-sm sm:h-7 sm:text-xs"
                       value={task.status}
                       onChange={(event) => onStatusChange(task, event.target.value as TaskStatus)}
                     >

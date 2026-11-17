@@ -524,3 +524,10 @@ describe('aplicação servida no mesmo processo', () => {
     await request(app).get('/health').expect(200, { status: 'ok' });
   });
 });
+
+describe('informação pública configurada pela P4S', () => {
+  it('é servida sem sessão e vem vazia quando nada foi configurado', async () => {
+    const response = await request(app).get('/api/v1/public-info').expect(200);
+    expect(response.body).toEqual({ contactEmail: null, legalIdentity: null, proposalTerms: [] });
+  });
+});

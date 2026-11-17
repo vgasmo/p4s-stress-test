@@ -17,6 +17,7 @@ import { useAssessment, useAssessments, useDeleteAssessment, useReissueProposal 
 import { useTasks } from '@/hooks/useTasks';
 import { ApiError, errorMessage } from '@/lib/api';
 import { formatDatePt, formatDateTimePt, formatEUR, formatPercent, sectorLabel, todayInLisbon } from '@/lib/formatters';
+import { printWithTitle } from '@/lib/print';
 import { isStaffSession, useSession } from '@/lib/session';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -263,7 +264,10 @@ function PlanHeader({ detail, history, staff }: { detail: AssessmentDetail; hist
             </Link>
           </Button>
         )}
-        <Button size="sm" onClick={() => window.print()}>
+        <Button
+          size="sm"
+          onClick={() => printWithTitle(`Resumo executivo · ${company.name} · ${formatDatePt(proposal.issuedOn).replaceAll('/', '-')}`)}
+        >
           <Printer aria-hidden /> Exportar Resumo Executivo (1 Página / PDF)
         </Button>
         {staff && <DeleteAssessmentButton assessmentId={detail.id} compact />}

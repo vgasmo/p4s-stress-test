@@ -10,6 +10,7 @@ import type {
   MeResponse,
   PasswordLink,
   PasswordLinkInfo,
+  PublicInfo,
   PublicSimulation,
 } from '@engine/models/api.types';
 import type { Company, Task, UserRole } from '@engine/models/domain';
@@ -128,6 +129,10 @@ async function refreshSession(companyId?: string | null): Promise<AuthSession> {
   );
   if (response.status === 401) sessionStore.set(null);
   const next = await parse<AuthSession>(response);
+  // Enquanto o pedido estava a caminho, a sessão pode ter terminado noutro separador ou
+  // passado para outra pessoa: esta resposta já não é de quem está no ecrã e não se grava.
+  const current = sessionStore.get();
+  if (!current || current.user.id !== next.user.id) throw new ApiError(401, 'UNAUTHORIZED', 'Sessão terminada.');
   sessionStore.set(next);
   return next;
 }
@@ -182,6 +187,9 @@ export const api = {
     request<PasswordLinkInfo>('POST', '/auth/password-link/inspect', { token }, false),
   setPassword: (token: string, password: string) =>
     request<AuthSession>('POST', '/auth/set-password', { token, password }, false),
+
+  /** Contacto e condições da proposta configurados pela P4S. Público. */
+  getPublicInfo: () => request<PublicInfo>('GET', '/public-info', undefined, false),
 
   /** Pesos, pisos, preços e prazos. Só para a equipa P4S: não fazem parte do código público. */
   getCatalog: () => request<Catalog>('GET', '/catalog'),
