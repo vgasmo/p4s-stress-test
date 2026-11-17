@@ -28,7 +28,7 @@ import { cn } from '@/lib/utils';
 import type { PlanNavigationState } from '@/pages/ActionPlanPage';
 import { LiveImpactPreview } from './LiveImpactPreview';
 import { RadioTiles } from './RadioTiles';
-import { useAppHeaderHeight } from './useElementHeight';
+import { useAppHeaderHeight, useElementHeight } from './useElementHeight';
 import {
   DEFAULT_STATE,
   applyToSessionCompany,
@@ -124,6 +124,7 @@ export function AssessmentWizard() {
   // Um botão rápido repõe o campo, mesmo que o valor escolhido seja o que já lá estava.
   const [picks, setPicks] = useState({ revenue: 0, credit: 0 });
   const headerHeight = useAppHeaderHeight();
+  const [pinnedRef, pinnedHeight] = useElementHeight<HTMLDivElement>();
 
   const company = me.data?.company ?? null;
   const ctx: DraftContext | undefined =
@@ -218,9 +219,16 @@ export function AssessmentWizard() {
 
   return (
     <div
-      // Um controlo que recebe o foco é trazido para baixo do cabeçalho fixo, e não para trás dele.
-      className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_420px] [&_:is(a,button,input,summary,[role=slider])]:scroll-mt-[var(--focus-top)]"
-      style={{ '--focus-top': `${headerHeight + 12}px` } as CSSProperties}
+      className={cn(
+        // Em ecrãs estreitos é uma coluna (e não uma grelha), para o número em risco poder
+        // ficar preso ao topo ao longo de todo o formulário.
+        'flex flex-col gap-6 lg:grid lg:grid-cols-[minmax(0,1fr)_420px] lg:items-start',
+        // Um controlo que recebe o foco é trazido para baixo do que está preso no topo (o
+        // cabeçalho e, em ecrãs estreitos, o número em risco), e não para trás disso.
+        '[--focus-top:calc(var(--pin-top)_+_var(--pin-height)_+_0.75rem)] lg:[--focus-top:calc(var(--pin-top)_+_0.75rem)]',
+        '[&_:is(a,button,input,summary,[role=slider])]:scroll-mt-[var(--focus-top)]',
+      )}
+      style={{ '--pin-top': `${headerHeight}px`, '--pin-height': `${pinnedHeight}px` } as CSSProperties}
     >
       <div className="space-y-4">
         <CompanyBlock
@@ -438,6 +446,7 @@ export function AssessmentWizard() {
         creditLineToRefinance={input.creditLineToRefinance}
         creditAmountMissing={creditMissing}
         onUseSampleRevenue={() => pickAmount('revenue', { annualRevenue: 5_000_000 })}
+        pinnedRef={pinnedRef}
         saveArea={
           <SaveArea
             mode={mode}
@@ -556,7 +565,7 @@ function SaveArea({
   return (
     <div className="space-y-2">
       {error && <ErrorBanner title="O diagnóstico não foi guardado." message={error} onRetry={onSave} retrying={saving} />}
-      <Button className="w-full" onClick={onSave} disabled={saving}>
+      <Button className="h-auto min-h-9 w-full whitespace-normal px-2 py-1.5" onClick={onSave} disabled={saving}>
         {saving ? 'A guardar…' : 'Guardar Diagnóstico e Gerar Plano de Ação'}
         {!saving && <ArrowRight aria-hidden />}
       </Button>
