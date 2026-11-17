@@ -6,8 +6,10 @@ import type { Catalog, StressTestInput } from '@engine/services/requirements';
 import { StressTestCalculatorService, type StressTestResult } from '@engine/services/stress-test-calculator.service';
 import { TaskGeneratorService, type GeneratedTaskDraft } from '@engine/services/task-generator.service';
 import { todayInLisbon } from '@engine/utils/dates';
-import { api, type CreateAssessmentPayload } from '@/lib/api';
+import { api, errorMessage, type CreateAssessmentPayload } from '@/lib/api';
+import { createSaveMemory, fingerprintOf, isSavedButNotOpened, saveAndOpenAssessment } from '@/lib/assessment-save';
 import { isStaffSession, sessionStore, useSession } from '@/lib/session';
+import { readStorage, writeStorage } from '@/lib/utils';
 import { tasksKey } from './useTasks';
 
 const generator = new TaskGeneratorService();
@@ -100,18 +102,41 @@ export function useAssessment(id: string | undefined) {
   });
 }
 
+// Diagnóstico já gravado cujo plano não chegou a abrir (ver lib/assessment-save.ts).
+const SAVED_ASSESSMENT_KEY = 'p4s.saved-assessment';
+const savedAssessment = createSaveMemory({
+  read: () => readStorage<unknown>('session', SAVED_ASSESSMENT_KEY),
+  write: (saved) => writeStorage('session', SAVED_ASSESSMENT_KEY, saved),
+});
+
+export { isSavedButNotOpened };
+
 /**
  * Guarda o diagnóstico. Se a P4S criou a empresa na hora, a sessão passa para essa
  * empresa antes de semear as caches, para o plano abrir já no contexto certo.
+ *
+ * São dois passos. Se a gravação correu bem e a troca de empresa falhou, o erro é um
+ * AssessmentSavedError (isSavedButNotOpened) e voltar a pedir com as mesmas respostas não grava
+ * outro diagnóstico: repete só a troca, mesmo depois de recarregar a página.
  */
 export function useCreateAssessment() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (payload: CreateAssessmentPayload): Promise<CreatedAssessment> => {
-      const detail = await api.createAssessment(payload);
-      if (sessionStore.get()?.companyId !== detail.company.id) await api.switchCompany(detail.company.id);
-      return detail;
-    },
+    mutationFn: (payload: CreateAssessmentPayload): Promise<CreatedAssessment> =>
+      saveAndOpenAssessment(
+        {
+          userId: sessionStore.get()?.user.id ?? '',
+          fingerprint: fingerprintOf(payload),
+          sessionCompanyId: () => sessionStore.get()?.companyId,
+        },
+        savedAssessment,
+        {
+          create: () => api.createAssessment(payload),
+          open: (companyId) => api.switchCompany(companyId),
+          load: (assessmentId) => api.getAssessment(assessmentId),
+          describe: errorMessage,
+        },
+      ),
     onSuccess: (detail) => {
       const companyId = detail.company.id;
       queryClient.setQueryData(assessmentKey(companyId, detail.id), detail);
@@ -119,6 +144,11 @@ export function useCreateAssessment() {
       void queryClient.invalidateQueries({ queryKey: ['assessments', companyId] });
       void queryClient.invalidateQueries({ queryKey: ['companies'] });
       void queryClient.invalidateQueries({ queryKey: ['me'] });
+    },
+    onError: (error) => {
+      // A empresa registada na hora já existe: passa a aparecer no seletor do topo, por onde
+      // também se chega ao plano.
+      if (isSavedButNotOpened(error)) void queryClient.invalidateQueries({ queryKey: ['companies'] });
     },
   });
 }
