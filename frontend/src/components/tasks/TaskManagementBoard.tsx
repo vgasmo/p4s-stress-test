@@ -62,9 +62,10 @@ export function TaskManagementBoard({ assessment, tasksQuery }: TaskManagementBo
   const today = todayInLisbon();
 
   const patchTask = (task: Task, patch: UpdateTaskInput) => {
-    // No kanban o cartão muda de coluna e é redesenhado: o foco passa para o seletor do cartão novo.
-    keepFocusAfterRedraw();
-    changes.change(task, patch);
+    // No kanban o cartão muda de coluna e é redesenhado: o foco passa para o seletor do cartão
+    // novo. Se a alteração falhar, o cartão volta para trás e o foco volta com ele.
+    const recoverFocus = keepFocusAfterRedraw();
+    changes.change(task, patch, recoverFocus);
   };
   const openTask = (task: Task | null) => setSheet({ open: true, task });
 

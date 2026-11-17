@@ -230,6 +230,39 @@ await page.waitForURL((url) => !url.pathname.endsWith(createdId));
 await settle();
 expectEq('eliminar: o diagnóstico deixa de existir', await apiStatus(`/assessments/${createdId}`, (await storedSession()).accessToken), 404);
 
+// ── 3e. O diagnóstico grava, mas a troca para a empresa dele falha: não se dá como perdido ──
+await page.getByLabel('Empresa cliente').selectOption('');
+await page.waitForURL(/\/$/);
+await page.getByLabel('NIF').waitFor();
+await page.getByLabel('Nome').fill('Embalagens Reunião E2E, Lda');
+await page.getByLabel('NIF').fill('503456780');
+let refreshFailures = 1;
+const failRefreshOnce = (route) => (refreshFailures-- > 0 ? route.fulfill({ ...serverError, status: 503 }) : route.continue());
+await page.route('**/api/v1/auth/refresh', failRefreshOnce);
+const errorsBeforeSwitchFailure = { http: httpErrors.length, console: consoleErrors.length };
+await page.getByRole('button', { name: /Guardar Diagnóstico/ }).click();
+const savedNotOpened = page.getByTestId('saved-not-opened');
+await savedNotOpened.waitFor();
+expectEq('troca falhada: diz que ficou guardado', (await savedNotOpened.innerText()).includes('O diagnóstico ficou guardado. Falta abrir o plano.'), true);
+expectEq('troca falhada: não diz que não foi guardado', (await page.locator('main').innerText()).includes('não foi guardado'), false);
+await page.unroute('**/api/v1/auth/refresh', failRefreshOnce);
+// O 503 foi forçado pelo teste.
+httpErrors.splice(errorsBeforeSwitchFailure.http);
+consoleErrors.splice(errorsBeforeSwitchFailure.console);
+await savedNotOpened.getByRole('button', { name: 'Abrir o plano' }).click();
+await page.waitForURL(/\/plano\/[0-9a-f-]{36}$/);
+await page.getByRole('heading', { name: 'Embalagens Reunião E2E, Lda' }).waitFor();
+await settle();
+const reopenedId = page.url().split('/').pop();
+const sameCompanyAssessments = await (await page.request.get(`${BASE}/api/v1/assessments`, { headers: { Authorization: `Bearer ${(await storedSession()).accessToken}` } })).json();
+// Só os desta corrida: a empresa pode ter diagnósticos de corridas anteriores.
+expectEq('troca falhada: ficou um só diagnóstico', sameCompanyAssessments.filter((entry) => Date.now() - new Date(entry.createdAt).getTime() < 60_000).length, 1);
+expectEq('troca falhada: «Abrir o plano» abre o que ficou guardado', sameCompanyAssessments[0].id, reopenedId);
+await page.getByRole('button', { name: 'Eliminar este diagnóstico' }).click();
+await page.getByTestId('delete-assessment-confirmation').getByRole('button', { name: 'Eliminar diagnóstico e tarefas' }).click();
+await page.waitForURL((url) => !url.pathname.endsWith(reopenedId));
+await settle();
+
 // ── 4. Empresa de demonstração: indicadores ─────────────────────────────────────────
 await page.getByLabel('Empresa cliente').selectOption(demoValue);
 await page.getByRole('heading', { name: 'Moldes Exemplo, Lda (demonstração)' }).waitFor();
@@ -286,6 +319,35 @@ await expectText('tentar novamente aplica a alteração', 'kpi-total', eur('5.60
 await tisaxExecutor.getByRole('radio', { name: 'Parceiro' }).click();
 await settle();
 await expectText('total reposto', 'kpi-total', eur('10.100'));
+
+// ── 6b. Exportar com uma alteração ainda por gravar: o resumo espera e sai com o que ficou ──
+await page.evaluate(() => {
+  window.__printed = [];
+  window.print = () => window.__printed.push(document.querySelector('[data-testid="executive-print-view"]').innerText);
+});
+const slowFailingPut = async (route) => {
+  if (route.request().method() !== 'PUT') return route.continue();
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  return route.fulfill(serverError);
+};
+await page.route('**/api/v1/tasks/*', slowFailingPut);
+const errorsBeforeSlowPut = { http: httpErrors.length, console: consoleErrors.length };
+await bankSwitch.click();
+await expectText('otimista antes de exportar', 'kpi-total', eur('8.300'));
+await page.getByTestId('export-summary').click();
+expectEq('exportar: espera pelas alterações por gravar', await page.getByTestId('export-summary').innerText(), 'A gravar alterações…');
+expectEq('exportar: ainda não imprimiu', await page.evaluate(() => window.__printed.length), 0);
+await page.waitForFunction(() => window.__printed.length === 1, null, { timeout: 8000 });
+const printedAfterFailure = await page.evaluate(() => window.__printed[0]);
+// A alteração falhou e foi desfeita: o resumo leva os 10.100 € que estão gravados, e não os 8.300 € do ecrã otimista.
+expectEq('exportar: o resumo sai com o que está gravado', printedAfterFailure.includes(eur('10.100')) && !printedAfterFailure.includes(eur('8.300')), true);
+await page.unroute('**/api/v1/tasks/*', slowFailingPut);
+httpErrors.splice(errorsBeforeSlowPut.http);
+consoleErrors.splice(errorsBeforeSlowPut.console);
+await page.getByText('A alteração não foi guardada e foi revertida.').waitFor();
+await page.getByRole('button', { name: 'Fechar', exact: true }).click();
+await settle();
+await expectText('total depois da exportação', 'kpi-total', eur('10.100'));
 
 // ── 7. Painel lateral ───────────────────────────────────────────────────────────────
 await page.getByRole('button', { name: /Editar «Auditoria de Emissões/ }).click();

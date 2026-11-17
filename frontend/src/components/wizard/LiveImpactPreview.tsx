@@ -112,21 +112,21 @@ export function LiveImpactPreview({ source, saveArea, pinnedRef, ...props }: Liv
   );
 
   return (
-    <Card className="max-lg:contents lg:sticky lg:top-16">
+    <Card className="max-lg:contents lg:sticky lg:top-[var(--pin-top,4rem)]">
       <div
         ref={pinnedRef}
         className={cn(
           // Preso logo abaixo do cabeçalho, com a linha de cima por baixo da linha dele.
           'sticky top-[calc(var(--pin-top,3rem)-1px)] z-20 order-first rounded-lg border border-slate-200 bg-white shadow-[0_10px_15px_-12px_rgb(15_23_42/0.5)]',
           // Dentro do painel: desenha o topo do cartão e tapa o que passa entre ele e o cabeçalho.
-          'lg:top-16 lg:z-10 lg:order-none lg:-mx-px lg:-mt-px lg:rounded-b-none lg:shadow-none',
+          'lg:top-[var(--pin-top,4rem)] lg:z-10 lg:order-none lg:-mx-px lg:-mt-px lg:rounded-b-none lg:shadow-none',
           "lg:before:pointer-events-none lg:before:absolute lg:before:-inset-x-px lg:before:bottom-[calc(100%+1px)] lg:before:h-4 lg:before:bg-slate-50 lg:before:content-['']",
         )}
       >
         <CardHeader className={cn('hidden items-center lg:flex', headline.kind === 'missing' && 'lg:border-b-0')}>{title}</CardHeader>
         <PinnedHeadline headline={headline} />
       </div>
-      <div className="rounded-lg border border-slate-200 bg-white lg:rounded-none lg:border-0 lg:bg-transparent lg:[--focus-top:calc(4rem_+_var(--pin-height,0px)_+_0.75rem)]">
+      <div className="rounded-lg border border-slate-200 bg-white lg:rounded-none lg:border-0 lg:bg-transparent lg:[--focus-top:calc(var(--pin-top,4rem)_+_var(--pin-height,0px)_+_0.75rem)]">
         <CardHeader className="items-center lg:hidden">{title}</CardHeader>
         {body}
         <div className="rounded-b-lg border-t border-slate-200 bg-slate-50 px-4 py-3">{saveArea}</div>

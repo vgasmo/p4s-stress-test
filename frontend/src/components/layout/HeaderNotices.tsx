@@ -41,7 +41,8 @@ export function HeaderNotices() {
           >
             <WifiOff aria-hidden className="mt-px size-3.5 shrink-0 text-amber-700" />
             <span>
-              <span className="font-medium">Sem ligação à internet.</span> As alterações não ficam guardadas até a ligação voltar.
+              <span className="font-medium">Sem ligação à internet.</span>{' '}
+              <span className="max-sm:sr-only">As alterações não ficam guardadas até a ligação voltar.</span>
             </span>
           </p>
         )}

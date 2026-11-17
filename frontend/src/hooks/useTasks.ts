@@ -107,13 +107,18 @@ export const savedTaskReads = {
  * respondidos, a lista é lida outra vez para o ecrã ficar com o que está mesmo gravado.
  * Sem ligação não faz nada: fica para a próxima alteração ou para quando a página voltar a ler.
  */
-async function readSavedTasks({ queryClient, key, assessmentId, tracker }: PlanContext): Promise<void> {
+async function readSavedTasks({ queryClient, key, assessmentId, tracker, companyId }: PlanContext): Promise<void> {
   if (!tracker.wantsRead) return;
+  // Depois de uma troca de empresa, o pedido levava a sessão da outra empresa e a API respondia
+  // com a lista dela para este diagnóstico, que é vazia: o plano ficava a zeros e o aviso da
+  // alteração falhada desaparecia. A leitura fica por fazer até se voltar a este plano.
+  const stillHere = () => sessionStore.get()?.companyId === companyId;
+  if (!stillHere()) return;
   const revision = tracker.revision;
   setConfirming(1);
   try {
     const tasks = await api.listTasks(assessmentId);
-    if (tracker.acceptRead(revision, tasks)) queryClient.setQueryData<Task[]>(key, tasks);
+    if (stillHere() && tracker.acceptRead(revision, tasks)) queryClient.setQueryData<Task[]>(key, tasks);
   } catch {
     // Sem resposta: o que está no ecrã fica como está.
   } finally {
@@ -159,8 +164,11 @@ export function useUpdateTask(assessmentId: string) {
 }
 
 export interface TaskChanges {
-  /** Altera uma tarefa na tabela ou no kanban. Se o servidor não gravar, a alteração vai para `failed`. */
-  change: (task: Task, patch: UpdateTaskInput) => void;
+  /**
+   * Altera uma tarefa na tabela ou no kanban. Se o servidor não gravar, a alteração vai para
+   * `failed` e `onReverted` é chamado depois de o ecrã a desfazer.
+   */
+  change: (task: Task, patch: UpdateTaskInput, onReverted?: () => void) => void;
   /** Alterações que não foram gravadas (no ecrã já estão desfeitas). */
   failed: readonly FailedChange[];
   /** Há pedidos deste plano ainda sem resposta. */
@@ -179,7 +187,7 @@ export function useTaskChanges(assessmentId: string): TaskChanges {
   const pending = useSyncExternalStore(tracker.subscribe, tracker.getPending);
 
   return {
-    change: (task, patch) => mutate({ id: task.id, patch, report: true }),
+    change: (task, patch, onReverted) => mutate({ id: task.id, patch, report: true }, { onError: onReverted }),
     failed,
     saving: pending.length > 0,
     retry: () => {

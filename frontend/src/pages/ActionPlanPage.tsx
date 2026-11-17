@@ -14,6 +14,7 @@ import { Select } from '@/components/ui/form';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState, ErrorBanner } from '@/components/ui/states';
 import { useAssessment, useAssessments, useDeleteAssessment, useReissueProposal } from '@/hooks/useAssessment';
+import { usePendingChanges } from '@/hooks/usePendingChanges';
 import { useTasks } from '@/hooks/useTasks';
 import { ApiError, errorMessage } from '@/lib/api';
 import { formatDatePt, formatDateTimePt, formatEUR, formatPercent, sectorLabel, todayInLisbon } from '@/lib/formatters';
@@ -200,6 +201,22 @@ function PlanHeader({ detail, history, staff, taskCount }: PlanHeaderProps) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const deleteButton = useRef<HTMLButtonElement>(null);
   const { company, proposal } = detail;
+  const { whenSettled } = usePendingChanges();
+  const [exporting, setExporting] = useState(false);
+
+  // O plano muda no ecrã antes de o servidor confirmar. O resumo só sai depois de as alterações
+  // ficarem gravadas ou desfeitas: o documento entregue ao cliente tem de ser o que está no sistema.
+  const exportSummary = async () => {
+    setExporting(true);
+    try {
+      await whenSettled();
+      // Dá tempo ao ecrã para mostrar o que ficou (uma alteração que falhe é desfeita).
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    } finally {
+      setExporting(false);
+    }
+    printWithTitle(`Resumo executivo · ${company.name} · ${formatDatePt(proposal.issuedOn).replaceAll('/', '-')}`);
+  };
 
   const cancelDelete = () => {
     setConfirmingDelete(false);
@@ -289,11 +306,8 @@ function PlanHeader({ detail, history, staff, taskCount }: PlanHeaderProps) {
               </Link>
             </Button>
           )}
-          <Button
-            size="sm"
-            onClick={() => printWithTitle(`Resumo executivo · ${company.name} · ${formatDatePt(proposal.issuedOn).replaceAll('/', '-')}`)}
-          >
-            <Printer aria-hidden /> Exportar Resumo Executivo (1 Página / PDF)
+          <Button size="sm" onClick={() => void exportSummary()} disabled={exporting} data-testid="export-summary">
+            <Printer aria-hidden /> {exporting ? 'A gravar alterações…' : 'Exportar Resumo Executivo (1 Página / PDF)'}
           </Button>
           {staff && (
             <Button

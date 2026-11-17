@@ -80,11 +80,17 @@ export function focusAfter(element: Element): void {
  * Para alterações que redesenham a lista à volta do controlo usado. Se, depois de o ecrã ser
  * redesenhado, o foco tiver ficado sem dono, passa para o controlo equivalente.
  */
-export function keepFocusAfterRedraw(): void {
+export function keepFocusAfterRedraw(): () => void {
   const origin = captureFocus();
-  if (!origin) return;
-  requestAnimationFrame(() => {
-    const active = document.activeElement;
-    if (!active || active === document.body) restoreFocus(origin);
-  });
+  const recover = () => {
+    if (!origin) return;
+    requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (!active || active === document.body) restoreFocus(origin);
+    });
+  };
+  recover();
+  // Para chamar outra vez se o ecrã voltar a ser redesenhado por causa da mesma alteração
+  // (uma falha desfaz a alteração e o cartão volta à coluna de onde saiu).
+  return recover;
 }

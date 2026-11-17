@@ -13,10 +13,11 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Slider } from '@/components/ui/slider';
 import { ErrorBanner } from '@/components/ui/states';
 import { Switch } from '@/components/ui/switch';
-import { useCompanies, useMe } from '@/hooks/useAuth';
+import { useAuthActions, useCompanies, useMe } from '@/hooks/useAuth';
 import { useCatalog, useCreateAssessment, usePublicSimulation, useStressTestPreview } from '@/hooks/useAssessment';
 import { useContactEmail } from '@/hooks/usePublicInfo';
 import { errorMessage, type CreateAssessmentPayload } from '@/lib/api';
+import { isSavedButNotOpened } from '@/lib/assessment-save';
 import { diagnosisRequestMailto } from '@/lib/contact';
 import {
   SECTOR_PROFILE_LABELS,
@@ -125,6 +126,9 @@ export function AssessmentWizard() {
   const companies = useCompanies();
   const navigate = useNavigate();
   const createAssessment = useCreateAssessment();
+  const { switchCompany } = useAuthActions();
+  // Diagnóstico já guardado cujo plano não abriu (a troca de empresa falhou): abrir é repetir só essa parte.
+  const [opening, setOpening] = useState<{ pending: boolean; error: string | null }>({ pending: false, error: null });
   const [triedSave, setTriedSave] = useState(false);
   // Campos em euros com texto que não foi percebido: o valor em vigor é o anterior, por isso
   // não se grava enquanto lá estiver.
@@ -216,6 +220,19 @@ export function AssessmentWizard() {
         navigate(`/plano/${detail.id}`, { state: planState });
       },
     });
+  };
+
+  const savedNotOpened = isSavedButNotOpened(createAssessment.error) ? createAssessment.error : null;
+  const openSaved = async () => {
+    if (!savedNotOpened) return;
+    setOpening({ pending: true, error: null });
+    try {
+      await switchCompany(savedNotOpened.companyId);
+      draft.clear();
+      navigate(`/plano/${savedNotOpened.assessmentId}`);
+    } catch (cause) {
+      setOpening({ pending: false, error: errorMessage(cause) });
+    }
   };
 
   const pickAmount = (field: 'revenue' | 'credit', patch: Partial<WizardState>) => {
@@ -504,7 +521,12 @@ export function AssessmentWizard() {
             onRestart={draft.restart}
             blocker={triedSave ? saveBlocker : null}
             saving={createAssessment.isPending}
-            error={createAssessment.isError ? errorMessage(createAssessment.error) : null}
+            error={createAssessment.isError && !savedNotOpened ? errorMessage(createAssessment.error) : null}
+            saved={
+              savedNotOpened
+                ? { reason: errorMessage(savedNotOpened.reason), opening: opening.pending, openError: opening.error, onOpen: () => void openSaved() }
+                : null
+            }
             onSave={save}
           />
         }
@@ -571,6 +593,7 @@ function SaveArea({
   blocker,
   saving,
   error,
+  saved,
   onSave,
 }: {
   mode: WizardMode;
@@ -586,6 +609,8 @@ function SaveArea({
   blocker: string | null;
   saving: boolean;
   error: string | null;
+  /** O diagnóstico ficou guardado, mas o plano não abriu. */
+  saved: { reason: string; opening: boolean; openError: string | null; onOpen: () => void } | null;
   onSave: () => void;
 }) {
   if (mode === 'anonymous') {
@@ -629,6 +654,28 @@ function SaveArea({
           Plan4Sustain.
         </p>
         {canRestart && <RestartButton onRestart={onRestart} />}
+      </div>
+    );
+  }
+  if (saved) {
+    // Já está gravado: o que falta é abrir o plano. Dizer «não foi guardado» levava a gravar outro.
+    return (
+      <div className="space-y-2">
+        <div role="alert" data-testid="saved-not-opened" className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 text-amber-950">
+          <p className="text-sm font-medium">O diagnóstico ficou guardado. Falta abrir o plano.</p>
+          <p className="mt-0.5 text-xs text-amber-900">
+            {saved.openError ?? saved.reason} Não precisa de o guardar outra vez: se alterar respostas e voltar a guardar, a
+            empresa fica com dois diagnósticos.
+          </p>
+          <Button size="sm" className="mt-2" onClick={saved.onOpen} disabled={saved.opening}>
+            {saved.opening ? 'A abrir…' : 'Abrir o plano'}
+            {!saved.opening && <ArrowRight aria-hidden />}
+          </Button>
+        </div>
+        <Button variant="outline" size="sm" className="h-auto min-h-8 w-full whitespace-normal py-1" onClick={onSave} disabled={saving || saved.opening}>
+          {saving ? 'A guardar…' : 'Guardar outro diagnóstico com as respostas atuais'}
+        </Button>
+        {blocker && <FieldError>{blocker}</FieldError>}
       </div>
     );
   }
