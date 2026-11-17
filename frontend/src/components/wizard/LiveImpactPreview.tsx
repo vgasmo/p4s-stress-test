@@ -198,9 +198,11 @@ function FullPreview({
           tone={result.estimatedSpreadPenalty > 0 ? 'amber' : 'plain'}
           size="sm"
         >
-          {creditLineToRefinance > 0
-            ? `${catalog.spreadPenaltyBps} bps sobre ${formatEUR(creditLineToRefinance)}`
-            : 'Sem refinanciamento'}
+          {creditLineToRefinance <= 0
+            ? 'Sem refinanciamento'
+            : result.evaluations.some((e) => e.requirement.code === 'banking_esg' && e.status === 'compliant')
+              ? 'Com rácios ESG, sem agravamento'
+              : `${catalog.spreadPenaltyBps} bps sobre ${formatEUR(creditLineToRefinance)}`}
         </Metric>
         <Metric label="Bloqueadores críticos" value={String(result.criticalGapCount)} tone={result.criticalGapCount > 0 ? 'rose' : 'plain'}>
           prioridade crítica

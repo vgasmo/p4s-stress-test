@@ -49,22 +49,32 @@ page.on('console', (msg) => msg.type() === 'error' && consoleErrors.push(msg.tex
 page.on('pageerror', (err) => consoleErrors.push(String(err)));
 
 // Pedidos à API em curso e respostas de erro (com URL, para se saber de onde vêm).
-let pending = 0;
+const inFlight = new Set();
 const httpErrors = [];
 const isApi = (request) => request.url().includes('/api/');
-page.on('request', (request) => isApi(request) && pending++);
-page.on('requestfinished', (request) => isApi(request) && pending--);
-page.on('requestfailed', (request) => isApi(request) && pending--);
+page.on('request', (request) => {
+  // Uma navegação para outro documento abandona os pedidos do anterior, sem os dar por falhados.
+  if (request.isNavigationRequest() && request.frame() === page.mainFrame()) inFlight.clear();
+  if (isApi(request)) inFlight.add(request);
+});
+page.on('requestfinished', (request) => inFlight.delete(request));
+page.on('requestfailed', (request) => inFlight.delete(request));
 page.on('response', (response) => {
   if (response.status() >= 400) httpErrors.push(`${response.status()} ${response.request().method()} ${new URL(response.url()).pathname}`);
 });
 
 const kpi = (id) => page.getByTestId(id).innerText();
-/** Espera que não haja pedidos à API em curso durante 150 ms seguidos. */
+/** Espera que não haja pedidos à API em curso durante 150 ms seguidos (no máximo 10 s). */
 const settle = async () => {
+  const started = Date.now();
   for (let quiet = 0; quiet < 3; ) {
     await page.waitForTimeout(50);
-    quiet = pending === 0 ? quiet + 1 : 0;
+    quiet = inFlight.size === 0 ? quiet + 1 : 0;
+    if (Date.now() - started > 10_000) {
+      fail(`pedidos sem resposta ao fim de 10 s: ${[...inFlight].map((r) => `${r.method()} ${new URL(r.url()).pathname}`).join(', ')}`);
+      inFlight.clear();
+      return;
+    }
   }
 };
 /** Espera que o indicador mostre exatamente o texto (comparação exata, não por substring). */
@@ -86,7 +96,16 @@ const loginAs = async (email, password) => {
   await page.getByLabel('Palavra-passe').fill(password);
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
 };
-const logout = () => page.getByRole('button', { name: /Terminar sessão/ }).click();
+/** «Sair» termina a sessão no servidor: espera pela resposta antes de continuar. */
+const logout = async () => {
+  await Promise.all([
+    page.waitForResponse((response) => response.url().endsWith('/api/v1/auth/logout')),
+    page.getByRole('button', { name: /Terminar sessão/ }).click(),
+  ]);
+};
+const storedSession = () => page.evaluate(() => JSON.parse(window.localStorage.getItem('p4s.session') ?? 'null'));
+const apiStatus = async (path, token) =>
+  (await page.request.get(`${BASE}/api/v1${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })).status();
 const serverError = { status: 500, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INTERNAL_ERROR', message: 'Erro interno. Tente novamente.' } }) };
 
 // ── 1. Simulação anónima ────────────────────────────────────────────────────────────
@@ -108,16 +127,22 @@ expectEq('sem sessão: a página não mostra pesos', /na exposição|bps/.test(p
 expectEq('sem sessão: o catálogo não é servido', (await page.request.get(`${BASE}/api/v1/catalog`)).status(), 401);
 await page.screenshot({ path: `${OUT}/01-wizard-anonimo.png`, fullPage: true });
 
-// ── 2. Entrar como empresa: a simulação feita antes mantém-se ───────────────────────
+// ── 2. Entrar como empresa: a simulação mantém-se, sempre por escalões e sem gravar ──
 await page.getByRole('link', { name: /Entrar para guardar/ }).click();
 await loginAs(COMPANY_EMAIL, COMPANY_PASSWORD);
 await page.waitForURL(/\/$/);
-await page.getByText('Moldes Exemplo, Lda (demonstração)').first().waitFor();
-// Com sessão passa a ver o valor estimado (ordem de grandeza): 6M × 0,75 = 4.500.000 €.
-await expectText('simulação mantida depois de entrar (empresa)', 'preview-revenue-at-risk', nb('≈ 4,5 M €'));
-expectEq('com sessão: valor calculado disponível', await page.getByTestId('preview-revenue-at-risk').getAttribute('title'), `Valor calculado: ${eur('4.500.000')}`);
+await page.getByText('Simulação para Moldes Exemplo, Lda (demonstração)').waitFor();
+// A conta de uma empresa vê o mesmo que um visitante: os pesos e os preços são da equipa P4S.
+await expectText('empresa: a simulação mantém-se, por escalões', 'preview-revenue-at-risk', `${nb('3,6 M €')} a ${nb('4,8 M €')}`);
+await settle();
+const companySession = await storedSession();
+expectEq('empresa: o catálogo não é servido', await apiStatus('/catalog', companySession.accessToken), 403);
+expectEq('empresa: a página não mostra pesos', /na exposição|bps/.test(await page.locator('body').innerText()), false);
+expectEq('empresa: não grava diagnósticos', await page.getByRole('button', { name: /Guardar Diagnóstico/ }).count(), 0);
+await page.getByRole('link', { name: 'Abrir o plano de ação da empresa' }).waitFor();
 await logout();
 await page.getByText('Sem registo, vê a ordem de grandeza').waitFor();
+expectEq('sair termina a sessão no servidor', await apiStatus('/auth/me', companySession.accessToken), 401);
 // Rascunho de origem (5M, 60%, nada conforme): escalão 80–100% de 3M.
 await expectText('rascunho limpo ao sair (não mostra dados do cliente)', 'preview-revenue-at-risk', `${nb('2,4 M €')} a ${nb('3 M €')}`);
 
@@ -134,6 +159,7 @@ await page.getByLabel('Empresa cliente').selectOption('');
 await page.waitForURL(/\/$/);
 await page.getByLabel('NIF').waitFor();
 await expectText('P4S → «sem empresa» volta ao stress test com rascunho limpo', 'preview-revenue-at-risk', nb('≈ 3 M €'));
+expectEq('P4S: valor calculado disponível', await page.getByTestId('preview-revenue-at-risk').getAttribute('title'), `Valor calculado: ${eur('3.000.000')}`);
 
 // ── 3b. Criação rápida de empresa por NIF + nome e gravação ─────────────────────────
 await page.getByLabel('Nome').fill('Embalagens Reunião E2E, Lda');
@@ -156,6 +182,24 @@ await expectText('plano gravado: carteira exposta', 'kpi-commercial-risk', nb('�
 await expectText('plano gravado: total', 'kpi-total', eur('7.300')); // EcoVadis 3.500 + âmbito 3 3.800
 await page.getByRole('heading', { name: 'Embalagens Reunião E2E, Lda' }).waitFor();
 log('sessão passou para a empresa criada');
+
+// ── 3c. Corrigir os dados da empresa (nome mal escrito na reunião) ───────────────────
+await page.getByRole('button', { name: 'Editar dados da empresa' }).click();
+await page.getByRole('dialog').waitFor();
+await page.getByLabel('Nome').fill('Embalagens Reunião E2E, SA');
+await page.getByLabel('CAE').fill('22220');
+await page.getByRole('button', { name: 'Guardar alterações' }).click();
+await page.getByRole('dialog').waitFor({ state: 'detached' });
+await page.getByRole('heading', { name: 'Embalagens Reunião E2E, SA' }).waitFor();
+await page.emulateMedia({ media: 'print' });
+expectEq('nome corrigido chega à linha «Aceite por» do resumo', (await page.getByTestId('executive-print-view').innerText()).includes('Aceite por Embalagens Reunião E2E, SA'), true);
+await page.emulateMedia({ media: 'screen' });
+await page.getByRole('button', { name: 'Editar dados da empresa' }).click();
+await page.getByLabel('Nome').fill('Embalagens Reunião E2E, Lda');
+await page.getByRole('button', { name: 'Guardar alterações' }).click();
+await page.getByRole('dialog').waitFor({ state: 'detached' });
+await page.getByRole('heading', { name: 'Embalagens Reunião E2E, Lda' }).waitFor();
+log('dados da empresa corrigidos e repostos');
 
 // ── 4. Empresa de demonstração: indicadores ─────────────────────────────────────────
 await page.getByLabel('Empresa cliente').selectOption(demoValue);
@@ -262,6 +306,11 @@ expectEq('resumo: explica como ler os números', printed.includes('Como ler este
 expectEq('resumo: NIS2 só se a empresa estiver abrangida', printed.includes('NIS2 (se a empresa estiver abrangida)'), true);
 expectEq('resumo: fases com a janela de dias', printed.includes('Fase 1 · Desbloqueio imediato (0–60 dias)'), true);
 expectEq('resumo: sem múltiplo de «proteção»', /proteção \d|protege/.test(printed), false);
+// A validade vem da data de emissão guardada no servidor, igual à que o plano mostra no ecrã.
+const validUntil = (await page.getByTestId('proposal-dates').textContent()).match(/\d{2}\/\d{2}\/\d{4}/)?.[0];
+expectEq('resumo: validade igual à do plano', (await page.getByTestId('proposal-validity').innerText()).includes(`válida por 30 dias (até ${validUntil})`), true);
+expectEq('resumo: diz de quando contam os prazos', printed.includes('Prazos calculados para adjudicação na data de emissão'), true);
+expectEq('resumo: remetente lido do requisito, não da descrição', /Exigido por:/.test(printed), false);
 const pdf = await page.pdf({ format: 'A4', printBackground: true, preferCSSPageSize: true });
 expectEq('páginas do PDF', (pdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) ?? []).length, 1);
 writeFileSync(`${OUT}/resumo-executivo.pdf`, pdf);
@@ -297,6 +346,38 @@ await page.getByText('Ainda não há diagnósticos para esta empresa').waitFor()
 await page.getByRole('link', { name: 'Iniciar Primeiro Stress Test' }).waitFor();
 await page.screenshot({ path: `${OUT}/09-vazio.png` });
 await page.unroute('**/api/v1/assessments', emptyList);
+
+// Um diagnóstico que a versão atual não consegue abrir e um erro inesperado no ecrã têm saída.
+// Os erros deste bloco são provocados de propósito: ficam fora da contagem final.
+const forcedFrom = { http: httpErrors.length, console: consoleErrors.length };
+const notOpenable = (route) =>
+  route.fulfill({
+    status: 409,
+    contentType: 'application/json',
+    body: JSON.stringify({ error: { code: 'ASSESSMENT_NOT_OPENABLE', message: 'Este diagnóstico foi gravado por uma versão anterior e não pode ser aberto.' } }),
+  });
+await page.route('**/api/v1/assessments/*', notOpenable);
+await page.goto(planUrl);
+await page.getByText('Este diagnóstico não se consegue abrir').waitFor();
+await page.unroute('**/api/v1/assessments/*', notOpenable);
+const brokenDetail = (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{"id":"x"}' });
+await page.route('**/api/v1/assessments/*', brokenDetail);
+await page.goto(planUrl);
+await page.getByText('Este ecrã não conseguiu abrir.').waitFor();
+expectEq('erro inesperado: a moldura da aplicação mantém-se', await page.getByRole('navigation', { name: 'Principal' }).isVisible(), true);
+await page.unroute('**/api/v1/assessments/*', brokenDetail);
+log('diagnóstico que não abre e erro de ecrã mostram mensagem com saída');
+await settle();
+httpErrors.splice(forcedFrom.http);
+consoleErrors.splice(forcedFrom.console);
+
+// Endereços construídos à mão não saem da aplicação nem a deixam em branco.
+await page.goto(`${BASE}/plano/..%2Ftasks`);
+await page.waitForURL(/\/plano\/[0-9a-f-]{36}$/);
+await page.goto(`${BASE}/entrar?next=/%09/example.com`);
+await page.waitForURL(/\/plano\/[0-9a-f-]{36}$/);
+await page.getByTestId('kpi-total').waitFor();
+log('endereços construídos à mão voltam ao plano');
 
 // ── 10b. Utilizadores: convite, link de uso único e desativação ─────────────────────
 await page.goto(BASE + '/utilizadores');
@@ -346,6 +427,9 @@ await page.getByRole('switch', { name: /Incluir «Dossier/ }).waitFor();
 expectEq('empresa: inclusão bloqueada', await page.getByRole('switch', { name: /Incluir «Dossier/ }).isDisabled(), true);
 expectEq('empresa: executor bloqueado', await tisaxExecutor.getByRole('radio', { name: 'Interno' }).isDisabled(), true);
 expectEq('empresa: sem seletor de empresas', await page.getByLabel('Empresa cliente').count(), 0);
+expectEq('empresa: sem «Novo diagnóstico»', await page.getByRole('link', { name: 'Novo diagnóstico' }).count(), 0);
+expectEq('empresa: não elimina diagnósticos', await page.getByRole('button', { name: 'Eliminar este diagnóstico' }).count(), 0);
+expectEq('empresa: não edita os dados da empresa', await page.getByRole('button', { name: 'Editar dados da empresa' }).count(), 0);
 await page.getByLabel(/Estado de «Dossier de Sustentabilidade/).selectOption('review');
 await settle();
 expectEq('empresa: pode mudar o estado', await page.getByLabel(/Estado de «Dossier de Sustentabilidade/).inputValue(), 'review');
@@ -354,6 +438,14 @@ await settle();
 await page.getByRole('button', { name: /Editar «Auditoria de Emissões/ }).click();
 await page.getByRole('dialog').waitFor();
 expectEq('empresa: honorários bloqueados no painel', await page.getByLabel('Honorários fixos').isDisabled(), true);
+// O âmbito e o prazo de um entregável são da P4S: a empresa acompanha (estado e responsável).
+const sheet = page.getByRole('dialog');
+await sheet.getByText('Esta tarefa foi definida pela P4S.').waitFor();
+expectEq('empresa: título bloqueado', await sheet.getByLabel('Título').isDisabled(), true);
+expectEq('empresa: prazo bloqueado', await sheet.getByLabel('Prazo', { exact: true }).isDisabled(), true);
+expectEq('empresa: descrição bloqueada', await sheet.getByLabel('Descrição').isDisabled(), true);
+expectEq('empresa: estado e responsável editáveis', (await sheet.getByLabel('Estado', { exact: true }).isEnabled()) && (await sheet.getByLabel('Responsável').isEnabled()), true);
+expectEq('empresa: responsáveis sem emails', /@/.test(await sheet.getByLabel('Responsável').innerText()), false);
 expectEq('empresa: sem botão de eliminar', await page.getByRole('button', { name: 'Eliminar', exact: true }).count(), 0);
 await page.waitForTimeout(350);
 await page.screenshot({ path: `${OUT}/10-empresa-sheet.png` });
@@ -368,7 +460,7 @@ expectEq('telemóvel, plano: scroll horizontal (px)', await overflow(), 0);
 await page.screenshot({ path: `${OUT}/11-telemovel-plano.png`, fullPage: true });
 await page.goto(BASE + '/');
 await page.getByTestId('preview-revenue-at-risk').waitFor();
-await page.getByText('Plano sugerido').waitFor();
+await page.getByText('O que falta').waitFor();
 expectEq('telemóvel, stress test: scroll horizontal (px)', await overflow(), 0);
 await page.screenshot({ path: `${OUT}/12-telemovel-wizard.png`, fullPage: true });
 

@@ -9,9 +9,21 @@ import { useAuthActions } from '@/hooks/useAuth';
 import { errorMessage } from '@/lib/api';
 import { useSession } from '@/lib/session';
 
-/** Só aceita caminhos internos (evita redirecionamentos para fora). */
+const DEFAULT_NEXT = '/plano';
+
+/**
+ * Só aceita caminhos internos: começa por uma só barra e não leva espaços, caracteres de
+ * controlo nem barras invertidas. Evita redirecionamentos para fora e destinos que o
+ * router recusa (e que deixavam a página em branco).
+ */
 function safeNext(value: string | null): string {
-  return value && value.startsWith('/') && !value.startsWith('//') && !value.includes('\\') ? value : '/plano';
+  if (!value || !/^\/(?!\/)[\x21-\x7E]*$/.test(value) || value.includes('\\')) return DEFAULT_NEXT;
+  try {
+    const url = new URL(value, window.location.origin);
+    return url.origin === window.location.origin ? `${url.pathname}${url.search}${url.hash}` : DEFAULT_NEXT;
+  } catch {
+    return DEFAULT_NEXT;
+  }
 }
 
 export function LoginPage() {
@@ -45,10 +57,10 @@ export function LoginPage() {
     <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_380px]">
       <div className="max-w-xl">
         <p className="text-2xs font-medium uppercase tracking-wide text-slate-600">Área reservada</p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">Guardar o diagnóstico e fechar a proposta</h1>
+        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">Diagnóstico, plano de ação e proposta</h1>
         <p className="mt-2 text-sm leading-relaxed text-slate-700">
-          A simulação é livre. Para gravar o diagnóstico, gerar o plano de ação faseado e exportar o resumo executivo, entre com
-          a conta da equipa P4S ou da sua empresa.
+          A simulação é livre. A equipa P4S entra para gravar o diagnóstico e fechar a proposta. As empresas clientes entram
+          para acompanhar o plano de ação e exportar o resumo executivo.
         </p>
       </div>
       <Card>

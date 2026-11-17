@@ -1,29 +1,36 @@
 // Regras de UI que espelham o RBAC da API (a API continua a ser quem decide).
 
-import { isPricedExecutor, type Task, type TaskPhase } from '@engine/models/domain';
+import type { AssessmentSnapshot } from '@engine/models/api.types';
+import type { Task, TaskPhase } from '@engine/models/domain';
 import { PHASE_WINDOWS } from '@engine/services/requirements';
 import { addDays } from '@engine/utils/dates';
 
 /**
- * Custo, executor, fase e inclusão na proposta de tarefas P4S ou do parceiro são
- * termos comerciais: só a equipa P4S os altera.
+ * O que quem está a ver pode alterar numa tarefa.
+ *  - all: a equipa P4S altera tudo;
+ *  - own: a empresa altera as tarefas que ela própria criou (sempre internas), menos o executor;
+ *  - follow-up: nas tarefas do diagnóstico e nas criadas pela P4S, a empresa só atualiza o
+ *    estado e o responsável. Âmbito, prazo e preço são da P4S, seja qual for o executor.
  */
-export function canEditProposalTerms(task: Pick<Task, 'executorType'>, staff: boolean): boolean {
-  return staff || !isPricedExecutor(task.executorType);
+export type TaskEditScope = 'all' | 'own' | 'follow-up';
+
+export function taskEditScope(task: Pick<Task, 'origin'>, staff: boolean): TaskEditScope {
+  if (staff) return 'all';
+  return task.origin === 'company' ? 'own' : 'follow-up';
 }
 
-/** «Exigido por: Cliente industrial / Diretiva NIS2.» na descrição gerada pelo motor. */
-export function requiredByFromDescription(description: string | null): string | null {
-  const match = description ? /Exigido por: (.+?)\.?\s*$/m.exec(description) : null;
-  return match?.[1] ?? null;
+/** Custo, fase e inclusão na proposta: quem os pode alterar nesta tarefa. */
+export function canEditProposalTerms(task: Pick<Task, 'origin'>, staff: boolean): boolean {
+  return taskEditScope(task, staff) !== 'follow-up';
 }
 
-/** Descrição sem a linha «Exigido por», para mostrar em texto corrido. */
-export function descriptionBody(description: string | null): string {
-  return (description ?? '').replace(/\n*Exigido por: .+$/m, '').trim();
+/** Quem exige o entregável, lido do requisito que o gerou. Null nas tarefas criadas à mão. */
+export function requiredByOf(task: Pick<Task, 'requirementCode'>, snapshot: AssessmentSnapshot): string | null {
+  if (!task.requirementCode) return null;
+  return snapshot.requirements.find((requirement) => requirement.code === task.requirementCode)?.requiredByLabel ?? null;
 }
 
-/** Último dia da janela da fase, contado a partir do dia do diagnóstico. */
+/** Último dia da janela da fase, contado a partir da data de emissão da proposta. */
 export function phaseEndDate(baseDate: string, phase: TaskPhase): string {
   return addDays(baseDate, PHASE_WINDOWS[phase].untilDay);
 }

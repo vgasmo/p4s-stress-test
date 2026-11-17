@@ -2,6 +2,7 @@
 // Cada alteração é otimista: os totais no topo mudam no mesmo frame.
 
 import { Lock, Pencil } from 'lucide-react';
+import type { AssessmentDetail } from '@engine/models/api.types';
 import { TASK_STATUSES, type Task, type TaskPhase } from '@engine/models/domain';
 import type { UpdateTaskInput } from '@engine/models/schemas';
 import { countsTowardsProposal, summarizeRemediation } from '@engine/services/remediation-summary';
@@ -22,13 +23,7 @@ import {
 } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
 import { PriorityBadge, pricedExecutorFor } from './TaskBadges';
-import {
-  canEditProposalTerms,
-  isAfterPhaseWindow,
-  isOverdue,
-  phaseEndDate,
-  requiredByFromDescription,
-} from './task-rules';
+import { canEditProposalTerms, isAfterPhaseWindow, isOverdue, phaseEndDate, requiredByOf } from './task-rules';
 
 const PHASES: TaskPhase[] = ['phase_1_urgent', 'phase_2_structural'];
 
@@ -53,14 +48,16 @@ interface ProposalConfiguratorProps {
   allTasks: Task[];
   staff: boolean;
   today: string;
-  /** Dia do diagnóstico: as janelas das fases contam a partir daqui. */
-  baseDate: string;
+  /** Diagnóstico a que o plano pertence: dá o remetente de cada entregável e a data de emissão da proposta. */
+  assessment: AssessmentDetail;
   onPatch: (task: Task, patch: UpdateTaskInput) => void;
   onOpen: (task: Task) => void;
 }
 
-export function ProposalConfigurator({ tasks, allTasks, staff, today, baseDate, onPatch, onOpen }: ProposalConfiguratorProps) {
+export function ProposalConfigurator({ tasks, allTasks, staff, today, assessment, onPatch, onOpen }: ProposalConfiguratorProps) {
   const summary = summarizeRemediation(allTasks, 0);
+  // As janelas das fases contam a partir da data de emissão da proposta.
+  const baseDate = assessment.proposal.issuedOn;
 
   return (
     <div className="space-y-5">
@@ -108,6 +105,7 @@ export function ProposalConfigurator({ tasks, allTasks, staff, today, baseDate, 
                       staff={staff}
                       today={today}
                       baseDate={baseDate}
+                      requiredBy={requiredByOf(task, assessment.snapshot)}
                       onPatch={onPatch}
                       onOpen={onOpen}
                     />
@@ -138,6 +136,7 @@ function ConfiguratorRow({
   staff,
   today,
   baseDate,
+  requiredBy,
   onPatch,
   onOpen,
 }: {
@@ -145,12 +144,12 @@ function ConfiguratorRow({
   staff: boolean;
   today: string;
   baseDate: string;
+  requiredBy: string | null;
   onPatch: (task: Task, patch: UpdateTaskInput) => void;
   onOpen: (task: Task) => void;
 }) {
   const editable = canEditProposalTerms(task, staff);
   const counts = countsTowardsProposal(task);
-  const requiredBy = requiredByFromDescription(task.description);
   const priced = pricedExecutorFor(task.domain);
   const overdue = isOverdue(task, today);
   const afterPhase = isAfterPhaseWindow(task, baseDate);

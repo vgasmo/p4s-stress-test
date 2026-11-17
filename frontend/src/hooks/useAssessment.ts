@@ -1,26 +1,28 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
-import type { AssessmentDetail } from '@engine/models/api.types';
+import type { AssessmentDetail, CreatedAssessment } from '@engine/models/api.types';
+import type { UpdateCompanyInput } from '@engine/models/schemas';
 import type { Catalog, StressTestInput } from '@engine/services/requirements';
 import { StressTestCalculatorService, type StressTestResult } from '@engine/services/stress-test-calculator.service';
 import { TaskGeneratorService, type GeneratedTaskDraft } from '@engine/services/task-generator.service';
 import { todayInLisbon } from '@engine/utils/dates';
 import { api, type CreateAssessmentPayload } from '@/lib/api';
-import { sessionStore, useSession } from '@/lib/session';
+import { isStaffSession, sessionStore, useSession } from '@/lib/session';
 import { tasksKey } from './useTasks';
 
 const generator = new TaskGeneratorService();
 
 /**
- * Catálogo (pesos, pisos, preços, prazos). Vem da API e só para quem tem sessão: não
- * está no código público. Muda com a versão da aplicação, por isso não se volta a pedir.
+ * Catálogo (pesos, pisos, preços, prazos). Vem da API e só para a equipa P4S: não está no
+ * código público nem chega às contas das empresas. Muda com a versão da aplicação, por
+ * isso não se volta a pedir.
  */
 export function useCatalog() {
   const session = useSession();
   return useQuery({
     queryKey: ['catalog', session?.user.id],
     queryFn: api.getCatalog,
-    enabled: session !== null,
+    enabled: isStaffSession(session),
     staleTime: Number.POSITIVE_INFINITY,
   });
 }
@@ -105,7 +107,7 @@ export function useAssessment(id: string | undefined) {
 export function useCreateAssessment() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (payload: CreateAssessmentPayload): Promise<AssessmentDetail> => {
+    mutationFn: async (payload: CreateAssessmentPayload): Promise<CreatedAssessment> => {
       const detail = await api.createAssessment(payload);
       if (sessionStore.get()?.companyId !== detail.company.id) await api.switchCompany(detail.company.id);
       return detail;
@@ -117,6 +119,49 @@ export function useCreateAssessment() {
       void queryClient.invalidateQueries({ queryKey: ['assessments', companyId] });
       void queryClient.invalidateQueries({ queryKey: ['companies'] });
       void queryClient.invalidateQueries({ queryKey: ['me'] });
+    },
+  });
+}
+
+/** Reemite a proposta com a data de hoje (equipa P4S). Os prazos por começar deslizam. */
+export function useReissueProposal(assessmentId: string) {
+  const session = useSession();
+  const queryClient = useQueryClient();
+  const companyId = session?.companyId;
+  return useMutation({
+    mutationFn: () => api.reissueProposal(assessmentId),
+    onSuccess: (detail: AssessmentDetail) => {
+      queryClient.setQueryData(assessmentKey(companyId, assessmentId), detail);
+      queryClient.setQueryData(tasksKey(companyId, assessmentId), detail.tasks);
+      void queryClient.invalidateQueries({ queryKey: ['assessments', companyId] });
+    },
+  });
+}
+
+export function useDeleteAssessment() {
+  const session = useSession();
+  const queryClient = useQueryClient();
+  const companyId = session?.companyId;
+  return useMutation({
+    mutationFn: (assessmentId: string) => api.deleteAssessment(assessmentId),
+    onSuccess: async (_result, assessmentId) => {
+      queryClient.removeQueries({ queryKey: assessmentKey(companyId, assessmentId) });
+      queryClient.removeQueries({ queryKey: tasksKey(companyId, assessmentId) });
+      await queryClient.invalidateQueries({ queryKey: ['assessments', companyId] });
+    },
+  });
+}
+
+/** Corrige os dados da empresa selecionada (equipa P4S). */
+export function useUpdateCompany(companyId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: UpdateCompanyInput) => api.updateCompany(companyId, patch),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['me'] });
+      void queryClient.invalidateQueries({ queryKey: ['companies'] });
+      // O nome e o NIF vêm dentro de cada diagnóstico (cabeçalho do plano e resumo impresso).
+      void queryClient.invalidateQueries({ queryKey: ['assessment', companyId] });
     },
   });
 }

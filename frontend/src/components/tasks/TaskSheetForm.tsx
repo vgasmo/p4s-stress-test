@@ -2,6 +2,7 @@
 
 import { Lock, Trash2 } from 'lucide-react';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import type { AssessmentDetail } from '@engine/models/api.types';
 import {
   TASK_DOMAINS,
   TASK_EXECUTORS,
@@ -30,13 +31,12 @@ import {
   EXECUTOR_LABELS,
   PHASE_SHORT_LABELS,
   PRIORITY_LABELS,
-  ROLE_LABELS,
   STATUS_LABELS,
   formatDatePt,
   phaseLabel,
   phaseWindowText,
 } from '@/lib/formatters';
-import { canEditProposalTerms, isAfterPhaseWindow, phaseEndDate, requiredByFromDescription } from './task-rules';
+import { isAfterPhaseWindow, phaseEndDate, requiredByOf, taskEditScope } from './task-rules';
 
 interface FormState {
   title: string;
@@ -102,13 +102,14 @@ interface TaskSheetFormProps {
   onOpenChange: (open: boolean) => void;
   /** null cria uma tarefa nova. */
   task: Task | null;
-  assessmentId: string;
-  /** Dia do diagnóstico: as janelas das fases contam a partir daqui. */
-  baseDate: string;
+  assessment: AssessmentDetail;
   staff: boolean;
 }
 
-export function TaskSheetForm({ open, onOpenChange, task, assessmentId, baseDate, staff }: TaskSheetFormProps) {
+export function TaskSheetForm({ open, onOpenChange, task, assessment, staff }: TaskSheetFormProps) {
+  const assessmentId = assessment.id;
+  // As janelas das fases contam a partir da data de emissão da proposta.
+  const baseDate = assessment.proposal.issuedOn;
   const users = useAssignableUsers();
   const update = useUpdateTask(assessmentId);
   const create = useCreateTask(assessmentId);
@@ -129,10 +130,13 @@ export function TaskSheetForm({ open, onOpenChange, task, assessmentId, baseDate
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((current) => ({ ...current, [key]: value }));
   // Numa tarefa nova o utilizador da empresa cria trabalho interno; numa existente vale a regra da API.
-  const termsEditable = task ? canEditProposalTerms(task, staff) : true;
+  const scope = task ? taskEditScope(task, staff) : staff ? 'all' : 'own';
+  // A empresa só acompanha as tarefas que não criou: estado e responsável.
+  const followUpOnly = scope === 'follow-up';
+  const termsEditable = !followUpOnly;
   const executorEditable = staff;
   const pending = update.isPending || create.isPending || remove.isPending;
-  const requiredBy = task ? requiredByFromDescription(task.description) : null;
+  const requiredBy = task ? requiredByOf(task, assessment.snapshot) : null;
 
   const close = () => onOpenChange(false);
 
@@ -183,7 +187,9 @@ export function TaskSheetForm({ open, onOpenChange, task, assessmentId, baseDate
               {task
                 ? requiredBy
                   ? `Exigido por ${requiredBy}.`
-                  : 'Tarefa adicionada manualmente ao plano.'
+                  : task.origin === 'company'
+                    ? 'Tarefa interna criada pela empresa.'
+                    : 'Tarefa acrescentada pela P4S ao plano.'
                 : staff
                   ? 'Entregável extra para a proposta ou tarefa interna da fábrica.'
                   : 'Tarefa interna da fábrica. Entregáveis P4S são acrescentados pela equipa P4S.'}
@@ -192,9 +198,23 @@ export function TaskSheetForm({ open, onOpenChange, task, assessmentId, baseDate
 
           <SheetBody>
             {error && <ErrorBanner title="Não foi possível guardar." message={error} />}
+            {followUpOnly && (
+              <p className="flex items-start gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                <Lock aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+                Esta tarefa foi definida pela P4S. Pode atualizar o estado e o responsável. Para mudar o âmbito, o prazo ou
+                o preço, fale com o seu consultor.
+              </p>
+            )}
 
             <Field label="Título" htmlFor="task-title">
-              <Input id="task-title" value={form.title} onChange={(e) => set('title', e.target.value)} autoFocus={!task} />
+              <Input
+                id="task-title"
+                value={form.title}
+                maxLength={255}
+                disabled={followUpOnly}
+                onChange={(e) => set('title', e.target.value)}
+                autoFocus={!task}
+              />
             </Field>
 
             <div className="grid grid-cols-2 gap-3">
@@ -213,6 +233,7 @@ export function TaskSheetForm({ open, onOpenChange, task, assessmentId, baseDate
                   type="date"
                   className="font-mono tabular-nums"
                   value={form.deadline}
+                  disabled={followUpOnly}
                   onChange={(e) => set('deadline', e.target.value)}
                 />
               </Field>
@@ -234,7 +255,7 @@ export function TaskSheetForm({ open, onOpenChange, task, assessmentId, baseDate
                 <option value="">{users.isError ? 'Lista indisponível' : 'Sem responsável'}</option>
                 {users.data?.map((user) => (
                   <option key={user.id} value={user.id}>
-                    {user.fullName} · {ROLE_LABELS[user.role]}
+                    {user.fullName} · {user.team === 'p4s' ? 'P4S' : 'Empresa'}
                   </option>
                 ))}
               </Select>
@@ -296,7 +317,12 @@ export function TaskSheetForm({ open, onOpenChange, task, assessmentId, baseDate
 
             <div className="grid grid-cols-2 gap-3">
               <Field label="Domínio" htmlFor="task-domain">
-                <Select id="task-domain" value={form.domain} onChange={(e) => set('domain', e.target.value as TaskDomain)}>
+                <Select
+                  id="task-domain"
+                  value={form.domain}
+                  disabled={followUpOnly}
+                  onChange={(e) => set('domain', e.target.value as TaskDomain)}
+                >
                   {TASK_DOMAINS.map((d) => (
                     <option key={d} value={d}>
                       {DOMAIN_LABELS[d]}
@@ -305,7 +331,12 @@ export function TaskSheetForm({ open, onOpenChange, task, assessmentId, baseDate
                 </Select>
               </Field>
               <Field label="Prioridade" htmlFor="task-priority">
-                <Select id="task-priority" value={form.priority} onChange={(e) => set('priority', e.target.value as TaskPriority)}>
+                <Select
+                  id="task-priority"
+                  value={form.priority}
+                  disabled={followUpOnly}
+                  onChange={(e) => set('priority', e.target.value as TaskPriority)}
+                >
                   {TASK_PRIORITIES.map((p) => (
                     <option key={p} value={p}>
                       {PRIORITY_LABELS[p]}
@@ -316,7 +347,14 @@ export function TaskSheetForm({ open, onOpenChange, task, assessmentId, baseDate
             </div>
 
             <Field label="Descrição" htmlFor="task-description">
-              <Textarea id="task-description" rows={5} value={form.description} onChange={(e) => set('description', e.target.value)} />
+              <Textarea
+                id="task-description"
+                rows={5}
+                maxLength={5000}
+                value={form.description}
+                disabled={followUpOnly}
+                onChange={(e) => set('description', e.target.value)}
+              />
             </Field>
           </SheetBody>
 

@@ -16,7 +16,9 @@ export function useAuthActions() {
     [queryClient],
   );
 
-  const logout = useCallback(() => {
+  /** Termina a sessão no servidor (todos os dispositivos) e limpa este browser, mesmo sem rede. */
+  const logout = useCallback(async () => {
+    await api.logout();
     sessionStore.set(null);
     queryClient.clear();
   }, [queryClient]);

@@ -8,7 +8,6 @@ import { countsTowardsProposal, summarizeRemediation } from '@engine/services/re
 import { FOOTER_SIGNATURE, Wordmark } from '@/components/layout/AppShell';
 import {
   EXECUTOR_SHORT_LABELS,
-  addDays,
   formatApproxEUR,
   formatApproxPerYear,
   formatDatePt,
@@ -19,18 +18,17 @@ import {
   phaseLabel,
   phaseWindowText,
   sectorLabel,
-  todayInLisbon,
 } from '@/lib/formatters';
 
 const PHASES: TaskPhase[] = ['phase_1_urgent', 'phase_2_structural'];
-const PROPOSAL_VALIDITY_DAYS = 30;
 
 export function ExecutivePrintView({ assessment, tasks }: { assessment: AssessmentDetail; tasks: Task[] }) {
   const { company, snapshot } = assessment;
   const summary = summarizeRemediation(tasks, assessment.commercialRevenueAtRisk);
   const included = tasks.filter((task) => task.includedInProposal);
   const gaps = snapshot.requirements.filter((r) => r.status === 'gap');
-  const issuedOn = todayInLisbon();
+  // Datas guardadas no servidor: imprimir mais tarde não muda a data de emissão nem a validade.
+  const { issuedOn, validUntil, validityDays, expired } = assessment.proposal;
 
   // Fora da moldura da app, que não é impressa quando esta vista existe.
   return createPortal(
@@ -173,17 +171,32 @@ export function ExecutivePrintView({ assessment, tasks }: { assessment: Assessme
         </p>
 
         <footer className="mt-4 border border-slate-400 p-3 print-avoid-break">
-          <p className="text-[11px] font-semibold">
-            Proposta de honorários fixos válida por {PROPOSAL_VALIDITY_DAYS} dias
-            <span className="font-normal text-slate-700">
-              {' '}
-              (até <span className="font-mono tabular-nums">{formatDatePt(addDays(issuedOn, PROPOSAL_VALIDITY_DAYS))}</span>)
-            </span>
-          </p>
-          <div className="mt-5 grid grid-cols-2 gap-6 text-[9px] text-slate-700">
-            <Signature label={`Aceite por ${company.name}`} />
-            <Signature label="Plan4Sustain" />
-          </div>
+          {expired ? (
+            <p className="text-[11px] font-semibold" data-testid="proposal-validity">
+              Proposta expirada em <span className="font-mono tabular-nums">{formatDatePt(validUntil)}</span>
+              <span className="block pt-0.5 text-[9px] font-normal text-slate-700">
+                Os honorários e os prazos acima deixaram de estar garantidos. Peça à Plan4Sustain a reemissão da proposta.
+              </span>
+            </p>
+          ) : (
+            <>
+              <p className="text-[11px] font-semibold" data-testid="proposal-validity">
+                Proposta de honorários fixos válida por {validityDays} dias
+                <span className="font-normal text-slate-700">
+                  {' '}
+                  (até <span className="font-mono tabular-nums">{formatDatePt(validUntil)}</span>)
+                </span>
+              </p>
+              <p className="mt-0.5 text-[9px] text-slate-700">
+                Prazos calculados para adjudicação na data de emissão. Se a adjudicação for posterior, deslizam o mesmo
+                número de dias.
+              </p>
+              <div className="mt-5 grid grid-cols-2 gap-6 text-[9px] text-slate-700">
+                <Signature label={`Aceite por ${company.name}`} />
+                <Signature label="Plan4Sustain" />
+              </div>
+            </>
+          )}
           <p className="mt-3 text-[8.5px] text-slate-700">{FOOTER_SIGNATURE}</p>
         </footer>
       </article>

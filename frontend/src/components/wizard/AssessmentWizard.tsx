@@ -1,4 +1,4 @@
-import { ArrowRight, Building2, LogIn } from 'lucide-react';
+import { ArrowRight, Building2, ClipboardList, LogIn } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { SECTOR_PROFILES, type SectorProfile } from '@engine/models/domain';
@@ -32,7 +32,11 @@ import {
 } from '@/lib/formatters';
 import { isStaffSession, useSession } from '@/lib/session';
 import { cn, readStorage, writeStorage } from '@/lib/utils';
+import type { PlanNavigationState } from '@/pages/ActionPlanPage';
 import { LiveImpactPreview } from './LiveImpactPreview';
+
+/** anonymous: visitante. company: conta de uma empresa (só simula). staff: equipa P4S (grava). */
+type WizardMode = 'anonymous' | 'company' | 'staff';
 
 export interface WizardState extends Record<AnswerField, boolean> {
   companyName: string;
@@ -134,12 +138,14 @@ export function AssessmentWizard() {
     // Só reage à mudança de empresa; o estado é lido no momento.
   }, [sessionCompanyId]);
 
+  const mode: WizardMode = !session ? 'anonymous' : staff ? 'staff' : 'company';
   const input = useMemo(() => toStressTestInput(state), [state]);
-  // Com sessão calcula-se aqui, com o catálogo que vem da API. Sem sessão o servidor
-  // devolve só ordens de grandeza: os pesos e os preços não estão no código público.
+  // A equipa P4S calcula aqui, com o catálogo que vem da API. Os outros (visitantes e contas
+  // de empresas) recebem do servidor só ordens de grandeza: os pesos e os preços não estão
+  // no código público nem saem para clientes.
   const catalog = useCatalog();
   const preview = useStressTestPreview(input, catalog.data);
-  const publicSimulation = usePublicSimulation(input, !session && state.annualRevenue > 0);
+  const publicSimulation = usePublicSimulation(input, !staff && state.annualRevenue > 0);
 
   if (session && me.isPending) return <WizardSkeleton />;
   if (session && me.isError) {
@@ -156,7 +162,7 @@ export function AssessmentWizard() {
   const quickCreate = staff && (!company || newCompany);
   const nifValid = isValidNif(state.companyNif.trim());
   const nameValid = state.companyName.trim().length >= 2;
-  const canSave = Boolean(session) && (!quickCreate || (nifValid && nameValid)) && state.annualRevenue > 0;
+  const canSave = staff && (!quickCreate || (nifValid && nameValid)) && state.annualRevenue > 0;
 
   const save = () => {
     setTriedSave(true);
@@ -165,10 +171,14 @@ export function AssessmentWizard() {
       ...toStressTestInput(state),
       ...(quickCreate ? { company: { name: state.companyName.trim(), nif: state.companyNif.trim() } } : {}),
     };
+    const typedName = state.companyName.trim();
     createAssessment.mutate(payload, {
       onSuccess: (detail) => {
         reset();
-        navigate(`/plano/${detail.id}`);
+        // O NIF já existia: o plano diz a que empresa o diagnóstico ficou associado.
+        const planState: PlanNavigationState =
+          detail.companyResolution === 'existing' ? { existingCompany: { typedName } } : {};
+        navigate(`/plano/${detail.id}`, { state: planState });
       },
     });
   };
@@ -180,8 +190,7 @@ export function AssessmentWizard() {
     <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_420px]">
       <div className="space-y-4">
         <CompanyBlock
-          session={Boolean(session)}
-          staff={staff}
+          mode={mode}
           companyName={company?.name ?? null}
           companyNif={company?.nif ?? null}
           quickCreate={quickCreate}
@@ -346,7 +355,7 @@ export function AssessmentWizard() {
 
       <LiveImpactPreview
         source={
-          session
+          staff
             ? {
                 kind: 'full',
                 preview,
@@ -368,7 +377,7 @@ export function AssessmentWizard() {
         onUseSampleRevenue={() => update({ annualRevenue: 5_000_000 })}
         saveArea={
           <SaveArea
-            session={Boolean(session)}
+            mode={mode}
             canSave={canSave}
             triedSave={triedSave}
             saving={createAssessment.isPending}
@@ -382,21 +391,21 @@ export function AssessmentWizard() {
 }
 
 function SaveArea({
-  session,
+  mode,
   canSave,
   triedSave,
   saving,
   error,
   onSave,
 }: {
-  session: boolean;
+  mode: WizardMode;
   canSave: boolean;
   triedSave: boolean;
   saving: boolean;
   error: string | null;
   onSave: () => void;
 }) {
-  if (!session) {
+  if (mode === 'anonymous') {
     return (
       <div className="space-y-2">
         <Button asChild className="w-full">
@@ -405,6 +414,21 @@ function SaveArea({
           </Link>
         </Button>
         <p className="text-2xs text-slate-600">As respostas ficam neste separador até entrar.</p>
+      </div>
+    );
+  }
+  if (mode === 'company') {
+    return (
+      <div className="space-y-2">
+        <Button asChild variant="outline" className="w-full">
+          <Link to="/plano">
+            <ClipboardList aria-hidden /> Abrir o plano de ação da empresa
+          </Link>
+        </Button>
+        <p className="text-2xs text-slate-600">
+          Isto é uma simulação: não altera o diagnóstico nem a proposta. Um novo diagnóstico é gravado com o seu consultor
+          Plan4Sustain.
+        </p>
       </div>
     );
   }
@@ -421,8 +445,7 @@ function SaveArea({
 }
 
 function CompanyBlock({
-  session,
-  staff,
+  mode,
   companyName,
   companyNif,
   quickCreate,
@@ -434,8 +457,7 @@ function CompanyBlock({
   nifValid,
   nameValid,
 }: {
-  session: boolean;
-  staff: boolean;
+  mode: WizardMode;
   companyName: string | null;
   companyNif: string | null;
   quickCreate: boolean;
@@ -447,13 +469,14 @@ function CompanyBlock({
   nifValid: boolean;
   nameValid: boolean;
 }) {
-  if (!session) {
+  if (mode !== 'staff') {
     return (
       <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3">
         <Badge tone="dark">Simulação</Badge>
         <p className="text-sm text-slate-700">
-          Sem registo, vê a ordem de grandeza do que está em jogo. O valor estimado, o plano e o preço fechado ficam no
-          diagnóstico completo.
+          {mode === 'company' && companyName
+            ? `Simulação para ${companyName}. Mostra a ordem de grandeza do que está em jogo com outras respostas. O diagnóstico e a proposta em vigor estão no plano de ação.`
+            : 'Sem registo, vê a ordem de grandeza do que está em jogo. O valor estimado, o plano e o preço fechado ficam no diagnóstico completo.'}
         </p>
       </div>
     );
@@ -504,7 +527,7 @@ function CompanyBlock({
               </FieldError>
             )}
             <FieldHint className="md:col-span-2">
-              {staff ? 'Se o NIF já existir, o diagnóstico fica associado a essa empresa.' : ''}
+              Se o NIF já existir, o diagnóstico fica associado à empresa registada, com o nome que lá está.
             </FieldHint>
           </div>
         ) : (

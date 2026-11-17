@@ -135,7 +135,7 @@ export function TaskManagementBoard({ assessment, tasksQuery }: TaskManagementBo
                     allTasks={allTasks}
                     staff={staff}
                     today={today}
-                    baseDate={assessment.snapshot.baseDate}
+                    assessment={assessment}
                     onPatch={patchTask}
                     onOpen={openTask}
                   />
@@ -158,8 +158,7 @@ export function TaskManagementBoard({ assessment, tasksQuery }: TaskManagementBo
         open={sheet.open}
         onOpenChange={(open) => setSheet((current) => ({ ...current, open }))}
         task={sheetTask}
-        assessmentId={assessment.id}
-        baseDate={assessment.snapshot.baseDate}
+        assessment={assessment}
         staff={staff}
       />
     </Card>

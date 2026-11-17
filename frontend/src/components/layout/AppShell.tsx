@@ -84,7 +84,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 >
                   <KeyRound aria-hidden />
                 </Button>
-                <Button variant="ghost" size="sm" onClick={logout} aria-label="Terminar sessão">
+                <Button variant="ghost" size="sm" onClick={() => void logout()} aria-label="Terminar sessão">
                   <LogOut aria-hidden />
                   <span className="hidden sm:inline">Sair</span>
                 </Button>

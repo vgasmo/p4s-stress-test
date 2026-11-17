@@ -1,6 +1,7 @@
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { AppShell } from '@/components/layout/AppShell';
+import { ErrorBoundary } from '@/components/layout/ErrorBoundary';
 import { useSession } from '@/lib/session';
 import { ActionPlanPage } from '@/pages/ActionPlanPage';
 import { LoginPage } from '@/pages/LoginPage';
@@ -15,13 +16,23 @@ function RequireSession({ children }: { children: ReactNode }) {
   return children;
 }
 
+/** Cada ecrã dentro da sua própria barreira: um erro num deles não apaga a moldura nem os outros. */
+function Screen() {
+  const location = useLocation();
+  return (
+    <ErrorBoundary resetKey={location.pathname}>
+      <Outlet />
+    </ErrorBoundary>
+  );
+}
+
 export function App() {
   return (
     <Routes>
       <Route
         element={
           <AppShell>
-            <Outlet />
+            <Screen />
           </AppShell>
         }
       >
