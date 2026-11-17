@@ -182,6 +182,32 @@ describe('recuperação e alteração de palavra-passe', () => {
     expect((await tryLogin('consultora@p4s.test', NEW_PASSWORD)).status).toBe(200);
   });
 
+  it('mudar a palavra-passe ou sair anula um link de recuperação que estivesse por usar', async () => {
+    const consultant = await login('consultora@p4s.test', fx.companyA.id);
+
+    // Mudar a palavra-passe.
+    const first = await newLink(consultant, fx.userA.id);
+    expect((await inspect(first.token)).status).toBe(200);
+    const session = await login('gestor@empresa-a.test');
+    await request(app)
+      .post('/api/v1/auth/change-password')
+      .set(bearer(session))
+      .send({ currentPassword: PASSWORD, newPassword: NEW_PASSWORD })
+      .expect(200);
+    expect((await inspect(first.token)).status).toBe(400);
+    expect((await setPassword(first.token, 'Palavra-passe-do-atacante-789')).status).toBe(400);
+    // A palavra-passe que a pessoa acabou de escolher continua a entrar.
+    const current = await tryLogin('gestor@empresa-a.test', NEW_PASSWORD);
+    expect(current.status).toBe(200);
+
+    // Sair.
+    const second = await newLink(consultant, fx.userA.id);
+    await request(app).post('/api/v1/auth/logout').send({ refreshToken: current.body.refreshToken }).expect(204);
+    expect((await inspect(second.token)).status).toBe(400);
+    expect((await setPassword(second.token, 'Palavra-passe-do-atacante-789')).status).toBe(400);
+    expect((await tryLogin('gestor@empresa-a.test', NEW_PASSWORD)).status).toBe(200);
+  });
+
   it('trocar a palavra-passe exige sessão', async () => {
     const response = await request(app)
       .post('/api/v1/auth/change-password')
@@ -223,6 +249,62 @@ describe('desativar e reativar', () => {
     const admin = await login('admin@p4s.test');
     const response = await request(app).put(`/api/v1/users/${fx.admin.id}`).set(bearer(admin)).send({ isActive: false });
     expect(response.status).toBe(400);
+  });
+
+  it('um convite de administrador por usar desativa-se, mesmo havendo um só administrador', async () => {
+    const admin = await login('admin@p4s.test');
+    const { user: invited, passwordLink } = await invite(admin, {
+      email: 'convite.enganado@p4s.test',
+      fullName: 'Convite Enganado',
+      role: 'admin',
+    });
+
+    const response = await request(app).put(`/api/v1/users/${invited.id}`).set(bearer(admin)).send({ isActive: false });
+    expect(response.status, JSON.stringify(response.body)).toBe(200);
+    expect(response.body.status).toBe('disabled');
+    // O link do convite deixa de servir.
+    expect((await inspect(passwordLink.token)).status).toBe(400);
+  });
+
+  it('dois administradores a desativarem-se um ao outro ao mesmo tempo não deixam a equipa sem nenhum', async () => {
+    const admin1 = await login('admin@p4s.test');
+    const { user: second, passwordLink } = await invite(admin1, {
+      email: 'admin2@p4s.test',
+      fullName: 'Segundo Admin',
+      role: 'admin',
+    });
+    const admin2 = (await setPassword(passwordLink.token, NEW_PASSWORD)).body as AuthSession;
+    const countAdmins = async () =>
+      Number(
+        (
+          await pool.query<{ n: string }>(
+            `SELECT count(*) AS n FROM users WHERE role = 'admin' AND is_active AND password_set_at IS NOT NULL`,
+          )
+        ).rows[0]?.n,
+      );
+
+    // Várias rondas: sem a fila de desativações, a corrida só se manifestava de vez em quando.
+    for (let round = 0; round < 5; round += 1) {
+      await pool.query(`UPDATE users SET is_active = TRUE WHERE role = 'admin'`);
+      const [a, b] = await Promise.all([
+        login('admin@p4s.test'),
+        request(app)
+          .post('/api/v1/auth/login')
+          .send({ email: 'admin2@p4s.test', password: NEW_PASSWORD })
+          .then((response) => response.body as AuthSession),
+      ]);
+      const statuses = await Promise.all([
+        request(app).put(`/api/v1/users/${second.id}`).set(bearer(a)).send({ isActive: false }),
+        request(app).put(`/api/v1/users/${fx.admin.id}`).set(bearer(b)).send({ isActive: false }),
+      ]).then((responses) => responses.map((response) => response.status).sort());
+
+      // Um dos pedidos passa. O outro é recusado: ou porque só restava esse administrador
+      // (409), ou porque quem o fez já tinha sido desativado (401).
+      expect(statuses[0], `ronda ${round}`).toBe(200);
+      expect([401, 409], `ronda ${round}`).toContain(statuses[1]);
+      expect(await countAdmins(), `ronda ${round}`).toBe(1);
+    }
+    expect(admin2.user.role).toBe('admin');
   });
 
   it('fica sempre pelo menos um administrador que consegue entrar', async () => {

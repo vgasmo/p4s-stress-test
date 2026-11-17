@@ -27,7 +27,18 @@ async function assertDatabaseIsReady(): Promise<void> {
 
 await assertDatabaseIsReady();
 
-const server = createApp().listen(env.PORT, () => {
+// O Express chama esta função também quando não consegue abrir o porto. Sem tratar o erro, a
+// API dizia que tinha arrancado e terminava sozinha pouco depois, com quem estava a testar a
+// falar para o processo antigo que ainda ocupava o porto.
+const server = createApp().listen(env.PORT, (error?: Error) => {
+  if (error) {
+    console.error(
+      (error as NodeJS.ErrnoException).code === 'EADDRINUSE'
+        ? `[api] O porto ${env.PORT} já está a ser usado por outro processo. Pare-o ou mude PORT.`
+        : `[api] Não foi possível abrir o porto ${env.PORT}: ${error.message}`,
+    );
+    process.exit(1);
+  }
   console.log(`[api] P4S Stress Test em http://localhost:${env.PORT}/api/v1`);
   console.log(
     env.TRUST_PROXY > 0

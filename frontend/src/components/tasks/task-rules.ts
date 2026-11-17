@@ -1,6 +1,6 @@
 // Regras de UI que espelham o RBAC da API (a API continua a ser quem decide).
 
-import type { AssessmentSnapshot } from '@engine/models/api.types';
+import type { RequirementView } from '@engine/models/api.types';
 import type { Task, TaskPhase } from '@engine/models/domain';
 import { PHASE_WINDOWS } from '@engine/services/requirements';
 import { addDays } from '@engine/utils/dates';
@@ -25,7 +25,10 @@ export function canEditProposalTerms(task: Pick<Task, 'origin'>, staff: boolean)
 }
 
 /** Quem exige o entregável, lido do requisito que o gerou. Null nas tarefas criadas à mão. */
-export function requiredByOf(task: Pick<Task, 'requirementCode'>, snapshot: AssessmentSnapshot): string | null {
+export function requiredByOf(
+  task: Pick<Task, 'requirementCode'>,
+  snapshot: { requirements: readonly Pick<RequirementView, 'code' | 'requiredByLabel'>[] },
+): string | null {
   if (!task.requirementCode) return null;
   return snapshot.requirements.find((requirement) => requirement.code === task.requirementCode)?.requiredByLabel ?? null;
 }

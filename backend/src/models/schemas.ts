@@ -69,6 +69,9 @@ export const refreshSchema = z.strictObject({
 });
 export type RefreshInput = z.infer<typeof refreshSchema>;
 
+export const logoutSchema = z.strictObject({ refreshToken: z.string().min(1).max(4096) });
+export type LogoutInput = z.infer<typeof logoutSchema>;
+
 const password = z
   .string()
   .min(PASSWORD_MIN_LENGTH, `A palavra-passe tem de ter pelo menos ${PASSWORD_MIN_LENGTH} caracteres.`)

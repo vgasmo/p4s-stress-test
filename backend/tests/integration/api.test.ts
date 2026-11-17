@@ -731,6 +731,58 @@ describe('GET /api/v1/catalog (pesos e preços só para a equipa P4S)', () => {
   });
 });
 
+describe('GET /api/v1/assessments/:id (o que cada conta recebe da fotografia do diagnóstico)', () => {
+  it('a equipa P4S recebe os pesos, a soma das lacunas e os preços e prazos de catálogo', async () => {
+    const consultant = await consultantForA();
+    const created = await createAssessmentAs(consultant);
+    const response = await request(app).get(`/api/v1/assessments/${created.id}`).set(bearer(consultant)).expect(200);
+    const { snapshot } = response.body as AssessmentDetail;
+
+    // Moldes automóvel sem EcoVadis (45), âmbito 3 (30) e segurança da informação (35).
+    expect(snapshot.commercialGapPoints).toBe(110);
+    const ecovadis = snapshot.requirements.find((r) => r.code === 'ecovadis');
+    expect(ecovadis).toMatchObject({ weightPoints: 45, solution: { estimatedCost: 3500, deadlineDays: 60 } });
+    // Também os dos requisitos que a empresa já cumpre.
+    const scope12 = snapshot.requirements.find((r) => r.code === 'carbon_scope_1_2');
+    expect(scope12).toMatchObject({ status: 'compliant', weightPoints: 30, solution: { estimatedCost: 2400 } });
+  });
+
+  it('a conta da empresa recebe o diagnóstico sem nada que deixe reconstruir o catálogo', async () => {
+    const created = await createAssessmentAs(await consultantForA());
+    const response = await request(app)
+      .get(`/api/v1/assessments/${created.id}`)
+      .set(bearer(await login('gestor@empresa-a.test')))
+      .expect(200);
+    const detail = response.body as AssessmentDetail;
+
+    // O que o resumo impresso já lhe dá: dados de partida, resultado, piso e agravamento de spread.
+    expect(detail.riskScore).toBe(100);
+    expect(detail.snapshot.input.topClientsShare).toBe(62);
+    expect(detail.snapshot.dealbreaker).toMatchObject({ floorPoints: 75, raisedWeight: false });
+    expect(detail.snapshot.spreadPenaltyBps).toBe(40);
+
+    // O que é do catálogo: peso de cada requisito, soma das lacunas, preços e prazos-tipo.
+    expect(detail.snapshot.commercialGapPoints).toBeNull();
+    expect(detail.snapshot.requirements).toHaveLength(5);
+    for (const requirement of detail.snapshot.requirements) {
+      expect(requirement.weightPoints, requirement.code).toBeNull();
+      expect(requirement.solution.estimatedCost, requirement.code).toBeNull();
+      expect(requirement.solution.deadlineDays, requirement.code).toBeNull();
+      expect(requirement, requirement.code).not.toHaveProperty('evidence');
+      // A matriz continua a saber em que fase cai e se é crítica.
+      expect(requirement.solution.phase, requirement.code).toMatch(/^phase_/);
+      expect(requirement.solution.priority, requirement.code).toBeTruthy();
+    }
+
+    // Os preços que a empresa vê são os da sua proposta, nas tarefas. Os dos entregáveis
+    // que não lhe foram propostos (requisitos que já cumpre) não vêm em lado nenhum.
+    const text = JSON.stringify(detail);
+    expect(detail.tasks.map((task) => task.estimatedCost).sort()).toEqual([1800, 3500, 3800, 4500].sort());
+    expect(text).not.toMatch(/"estimatedCost":\s*2400/);
+    expect(text).not.toMatch(/"weightPoints":\s*\d|"deadlineDays":\s*\d|"commercialGapPoints":\s*\d|"evidence"/);
+  });
+});
+
 describe('infraestrutura', () => {
   it('rota inexistente responde 404 em JSON', async () => {
     const response = await request(app).get('/api/v1/nada').expect(404);

@@ -4,6 +4,7 @@ import type {
   AssessmentDetail,
   AssessmentListEntry,
   AssessmentSnapshot,
+  AssessmentSnapshotView,
   CompanyResolution,
   CompanySummary,
   CreatedAssessment,
@@ -150,9 +151,53 @@ function proposalInfo(assessment: Assessment, today: string = todayInLisbon()): 
   return { issuedOn, validUntil, validityDays: PROPOSAL_VALIDITY_DAYS, expired: today > validUntil };
 }
 
+/**
+ * A fotografia que uma conta de empresa recebe. Leva o que o resumo impresso já lhe dá e
+ * deixa de fora o que é do catálogo privado: o peso de cada requisito (e a fonte desse peso),
+ * a soma das lacunas e os preços e prazos de catálogo, incluindo os dos entregáveis que não
+ * lhe foram propostos. Campo a campo, para nada do que estiver gravado passar por arrasto.
+ */
+export function snapshotForCompany(snapshot: AssessmentSnapshot): AssessmentSnapshotView {
+  return {
+    engineVersion: snapshot.engineVersion,
+    baseDate: snapshot.baseDate,
+    input: snapshot.input,
+    exposedClientRevenue: snapshot.exposedClientRevenue,
+    commercialGapPoints: null,
+    commercialRiskPoints: snapshot.commercialRiskPoints,
+    commercialRevenueAtRiskShare: snapshot.commercialRevenueAtRiskShare,
+    criticalGapCount: snapshot.criticalGapCount,
+    ...(snapshot.spreadPenaltyBps !== undefined ? { spreadPenaltyBps: snapshot.spreadPenaltyBps } : {}),
+    dealbreaker: snapshot.dealbreaker && {
+      sector: snapshot.dealbreaker.sector,
+      floorPoints: snapshot.dealbreaker.floorPoints,
+      triggeredBy: snapshot.dealbreaker.triggeredBy,
+      reason: snapshot.dealbreaker.reason,
+      raisedWeight: snapshot.dealbreaker.raisedWeight,
+    },
+    requirements: snapshot.requirements.map((requirement) => ({
+      code: requirement.code,
+      label: requirement.label,
+      channel: requirement.channel,
+      status: requirement.status,
+      weightPoints: null,
+      requiredBy: requirement.requiredBy,
+      requiredByLabel: requirement.requiredByLabel,
+      solution: {
+        title: requirement.solution.title,
+        executorType: requirement.solution.executorType,
+        phase: requirement.solution.phase,
+        priority: requirement.solution.priority,
+        estimatedCost: null,
+        deadlineDays: null,
+      },
+    })),
+  };
+}
+
 function buildDetail(
   assessment: Assessment,
-  snapshot: AssessmentSnapshot,
+  snapshot: AssessmentSnapshotView,
   company: Company,
   tasks: Task[],
   conductedByName: string | null,
@@ -299,7 +344,8 @@ export const assessmentService = {
     if (!company) throw notFound('Empresa não encontrada.');
     const tasks = await taskModel.list(pool, ctx.companyId, { assessmentId: assessment.id });
     const author = await assessmentModel.conductedByName(pool, ctx.companyId, assessment.id);
-    return buildDetail(assessment, snapshot, company, tasks, author);
+    const visible = isStaffRole(ctx.role) ? snapshot : snapshotForCompany(snapshot);
+    return buildDetail(assessment, visible, company, tasks, author);
   },
 
   /**
@@ -341,8 +387,8 @@ export const assessmentService = {
   },
 
   /**
-   * Reemite a proposta com a data de hoje. Os entregáveis da P4S e do parceiro que ainda não
-   * começaram deslizam os mesmos dias, para manterem a duração prometida.
+   * Reemite a proposta com a data de hoje. Os entregáveis da P4S e do parceiro por concluir
+   * deslizam os mesmos dias, para manterem a duração prometida.
    */
   async reissueProposal(ctx: TenantContext, id: string): Promise<AssessmentDetail> {
     assertStaff(ctx.role, 'Só a equipa P4S reemite propostas.');

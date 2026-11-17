@@ -5,6 +5,7 @@ import type {
   ChangePasswordInput,
   InspectPasswordLinkInput,
   LoginInput,
+  LogoutInput,
   RefreshInput,
   SetPasswordInput,
 } from '../models/schemas.js';
@@ -25,7 +26,7 @@ export const authController = {
   },
 
   async logout(req: Request, res: Response): Promise<void> {
-    await authService.logout(getAuth(req));
+    await authService.logout(validated<LogoutInput>(req, 'body').refreshToken);
     res.status(204).end();
   },
 

@@ -170,12 +170,14 @@ export const api = {
   login: (email: string, password: string) =>
     request<AuthSession>('POST', '/auth/login', { email, password }, false),
   /**
-   * Termina a sessão no servidor, em todos os dispositivos. Sem nova tentativa: se o token
-   * já não valer ou não houver rede, quem chama limpa a sessão deste browser na mesma.
+   * Termina a sessão no servidor, em todos os dispositivos. Vai com o refresh token, que vale
+   * enquanto a sessão existir: o token de acesso pode já ter expirado se o separador esteve
+   * parado. Sem nova tentativa: se a sessão já não valer ou não houver rede, quem chama limpa
+   * a sessão deste browser na mesma.
    */
   logout: async (): Promise<void> => {
-    const token = sessionStore.get()?.accessToken;
-    if (token) await send('POST', '/auth/logout', undefined, token).catch(() => undefined);
+    const refreshToken = sessionStore.get()?.refreshToken;
+    if (refreshToken) await send('POST', '/auth/logout', { refreshToken }, null).catch(() => undefined);
   },
   /** Renova a sessão; com companyId muda a empresa selecionada (equipa P4S). */
   switchCompany: (companyId: string | null) => refreshSession(companyId),

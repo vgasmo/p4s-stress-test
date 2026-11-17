@@ -91,6 +91,15 @@ export const userModel = {
     return rows.map(toUser);
   },
 
+  /**
+   * Põe as desativações de contas em fila até ao fim da transação. Sem isto, dois
+   * administradores a desativarem-se um ao outro ao mesmo tempo passavam ambos na contagem
+   * e a equipa ficava sem nenhum.
+   */
+  async lockDeactivations(db: Queryable): Promise<void> {
+    await db.query(`SELECT pg_advisory_xact_lock(hashtext('p4s.user-deactivation'))`);
+  },
+
   /** Administradores que conseguem mesmo entrar: ativos e com palavra-passe definida. */
   async countActiveAdmins(db: Queryable): Promise<number> {
     const { rows } = await db.query<{ n: string }>(

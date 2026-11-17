@@ -120,12 +120,16 @@ export const userService = {
 
   async update(auth: AuthUser, id: string, patch: UpdateUserInput): Promise<ManagedUser> {
     return withTransaction(async (client) => {
+      if (patch.isActive === false) await userModel.lockDeactivations(client);
       const target = await loadManageable(client, auth, id, true);
       if (patch.isActive === false && target.isActive) {
         if (target.id === auth.userId) throw badRequest('Não pode desativar a sua própria conta.');
-        if (target.role === 'admin' && (await userModel.countActiveAdmins(client)) <= 1) {
-          throw conflict('Tem de existir pelo menos um administrador ativo.');
-        }
+        // A regra protege quem consegue entrar. Um convite de administrador por usar não conta
+        // e desativa-se sempre. Quem pede pode já ter sido desativado por um pedido simultâneo:
+        // por isso conta-se quem fica, e não se assume que quem pede continua lá.
+        const lastAdmin =
+          target.role === 'admin' && target.passwordSetAt !== null && (await userModel.countActiveAdmins(client)) <= 1;
+        if (lastAdmin) throw conflict('Tem de existir pelo menos um administrador ativo.');
         // Uma conta desativada não deve ter links por usar à espera.
         await passwordTokenModel.deleteUnusedForUser(client, target.id);
       }
@@ -182,7 +186,13 @@ export const userService = {
     if (input.newPassword.toLowerCase() === user.email.toLowerCase()) {
       throw badRequest('A palavra-passe não pode ser o email.');
     }
-    const updated = await userModel.setPassword(pool, user.id, await hashPassword(input.newPassword));
+    const passwordHash = await hashPassword(input.newPassword);
+    const updated = await withTransaction(async (client) => {
+      // Quem muda a palavra-passe por desconfiar de um acesso indevido não pode ficar com um
+      // link de recuperação antigo ainda válido.
+      await passwordTokenModel.deleteUnusedForUser(client, user.id);
+      return userModel.setPassword(client, user.id, passwordHash);
+    });
     if (!updated) throw unauthorized('Sessão inválida.');
     // Mantém a empresa em que a pessoa estava a trabalhar.
     return issueSession(updated, await resolveCompanyScope(updated, auth.companyId ?? undefined));

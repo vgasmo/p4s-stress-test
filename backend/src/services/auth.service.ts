@@ -1,10 +1,11 @@
 import bcrypt from 'bcryptjs';
-import { pool } from '../config/database.js';
+import { pool, withTransaction } from '../config/database.js';
 import { env } from '../config/env.js';
 import { nowInSeconds, signAccessToken, signRefreshToken, verifyRefreshToken } from '../config/jwt.js';
 import type { AuthSession, MeResponse } from '../models/api.types.js';
 import { companyModel } from '../models/company.model.js';
 import type { AuthUser, User } from '../models/domain.js';
+import { passwordTokenModel } from '../models/password-token.model.js';
 import type { LoginInput, RefreshInput } from '../models/schemas.js';
 import { toPublicUser, userModel } from '../models/user.model.js';
 import { forbidden, notFound, unauthorized } from '../utils/errors.js';
@@ -73,9 +74,20 @@ export const authService = {
     return issueSession(user, await resolveCompanyScope(user, requested), claims.sessionStartedAt);
   },
 
-  /** Termina a sessão em todos os dispositivos: os tokens emitidos até agora deixam de valer. */
-  async logout(auth: AuthUser): Promise<void> {
-    await userModel.revokeSessions(pool, auth.userId);
+  /**
+   * Termina a sessão em todos os dispositivos: os tokens emitidos até agora deixam de valer,
+   * e os links de palavra-passe por usar também. Quem sai identifica-se com o refresh token,
+   * que vale enquanto a sessão existir. O token de acesso expira ao fim de minutos: exigi-lo
+   * deixava «Sair» sem efeito no servidor depois de um intervalo sem pedidos.
+   */
+  async logout(refreshToken: string): Promise<void> {
+    const claims = verifyRefreshToken(refreshToken);
+    await withTransaction(async (client) => {
+      const user = await userModel.findById(client, claims.userId, { forUpdate: true });
+      if (!user || claims.tokenVersion !== user.tokenVersion) throw unauthorized('Sessão inválida ou expirada.');
+      await userModel.revokeSessions(client, user.id);
+      await passwordTokenModel.deleteUnusedForUser(client, user.id);
+    });
   },
 
   async me(auth: AuthUser): Promise<MeResponse> {

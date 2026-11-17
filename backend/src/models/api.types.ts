@@ -101,6 +101,16 @@ export interface PasswordLinkInfo {
 
 // ── Diagnóstico ─────────────────────────────────────────────────────────────────────
 
+/** Solução-tipo de um requisito no dia do diagnóstico, com o preço e o prazo de catálogo. */
+export interface RequirementSolution {
+  title: string;
+  executorType: TaskExecutor;
+  phase: TaskPhase;
+  priority: TaskPriority;
+  estimatedCost: number;
+  deadlineDays: number;
+}
+
 /** Fotografia de um requisito tal como foi avaliado (matriz de lacunas). */
 export interface RequirementSnapshot {
   code: RequirementCode;
@@ -112,13 +122,18 @@ export interface RequirementSnapshot {
   evidence?: string;
   requiredBy: RequirementSource[];
   requiredByLabel: string;
-  solution: {
-    title: string;
-    executorType: TaskExecutor;
-    phase: TaskPhase;
-    priority: TaskPriority;
-    estimatedCost: number;
-    deadlineDays: number;
+  solution: RequirementSolution;
+}
+
+/**
+ * Um requisito como a API o devolve. O peso de cada requisito e o preço e o prazo de catálogo
+ * são da equipa P4S: para as contas das empresas vêm a null (e a fonte do peso não vem).
+ */
+export interface RequirementView extends Omit<RequirementSnapshot, 'weightPoints' | 'solution'> {
+  weightPoints: number | null;
+  solution: Omit<RequirementSolution, 'estimatedCost' | 'deadlineDays'> & {
+    estimatedCost: number | null;
+    deadlineDays: number | null;
   };
 }
 
@@ -202,6 +217,18 @@ export interface AssessmentSnapshot {
   requirements: RequirementSnapshot[];
 }
 
+/**
+ * A fotografia como a API a devolve. A equipa P4S recebe-a inteira. As contas das empresas
+ * recebem o que o resumo impresso já lhes dá (dados de partida, score, piso setorial e
+ * agravamento de spread) e não recebem o que permitiria reconstruir o catálogo: o peso de
+ * cada requisito, a soma das lacunas e os preços e prazos de catálogo.
+ */
+export interface AssessmentSnapshotView extends Omit<AssessmentSnapshot, 'commercialGapPoints' | 'requirements'> {
+  /** Soma dos pesos das lacunas, antes do piso e do teto. Null para as contas das empresas. */
+  commercialGapPoints: number | null;
+  requirements: RequirementView[];
+}
+
 /** Datas da proposta de honorários (dias de calendário de Lisboa, AAAA-MM-DD). */
 export interface ProposalInfo {
   issuedOn: string;
@@ -235,7 +262,7 @@ export interface AssessmentDetail {
   completedAt: string | null;
   createdAt: string;
   company: CompanySummary;
-  snapshot: AssessmentSnapshot;
+  snapshot: AssessmentSnapshotView;
   proposal: ProposalInfo;
   /** Calculado sobre as tarefas atuais (reflete o que foi configurado na proposta). */
   remediationSummary: RemediationSummary;

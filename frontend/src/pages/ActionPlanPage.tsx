@@ -359,7 +359,7 @@ function ProposalValidity({ detail, staff }: { detail: AssessmentDetail; staff: 
         </p>
         <p className="text-xs text-amber-900">
           {staff
-            ? 'Os honorários e os prazos deixaram de estar garantidos. Ao reemitir, a validade recomeça hoje e os entregáveis por começar deslizam os mesmos dias.'
+            ? 'Os honorários e os prazos deixaram de estar garantidos. Ao reemitir, a validade recomeça hoje e os entregáveis por concluir deslizam os mesmos dias.'
             : 'Os honorários e os prazos deixaram de estar garantidos. Peça a reemissão ao seu consultor Plan4Sustain.'}
         </p>
         {reissue.isError && <p className="mt-1 text-xs font-medium text-rose-800">{errorMessage(reissue.error)}</p>}

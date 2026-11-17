@@ -489,6 +489,14 @@ expectEq('empresa: sem seletor de empresas', await page.getByLabel('Empresa clie
 expectEq('empresa: sem «Novo diagnóstico»', await page.getByRole('link', { name: 'Novo diagnóstico' }).count(), 0);
 expectEq('empresa: não elimina diagnósticos', await page.getByRole('button', { name: 'Eliminar este diagnóstico' }).count(), 0);
 expectEq('empresa: não edita os dados da empresa', await page.getByRole('button', { name: 'Editar dados da empresa' }).count(), 0);
+// As contas mostram à empresa o resultado e o peso usado, mas não o peso de cada lacuna, que é do catálogo.
+await page.getByText('De onde vêm os números').click();
+const companyAssumptions = await page.locator('details', { hasText: 'De onde vêm os números' }).innerText();
+expectEq('empresa: as contas não mostram o peso de cada lacuna', /Sem (EcoVadis|Pegada|Segurança)/.test(companyAssumptions), false);
+expectEq('empresa: as contas mostram o peso usado e o resultado', companyAssumptions.includes('Peso usado (parte dessa faturação considerada em risco)') && companyAssumptions.includes('Carteira comercial exposta'), true);
+const companyDetail = await page.request.get(`${BASE}/api/v1/assessments/${page.url().split('/').pop()}`, { headers: { Authorization: `Bearer ${(await storedSession()).accessToken}` } });
+const companySnapshot = (await companyDetail.json()).snapshot;
+expectEq('empresa: a API não lhe entrega pesos nem preços de catálogo', companySnapshot.commercialGapPoints === null && companySnapshot.requirements.every((r) => r.weightPoints === null && r.solution.estimatedCost === null && r.solution.deadlineDays === null), true);
 await page.getByLabel(/Estado de «Dossier de Sustentabilidade/).selectOption('review');
 await settle();
 expectEq('empresa: pode mudar o estado', await page.getByLabel(/Estado de «Dossier de Sustentabilidade/).inputValue(), 'review');

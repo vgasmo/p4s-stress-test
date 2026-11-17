@@ -56,7 +56,7 @@ describe('sessão', () => {
     const otherDevice = await login('gestor@empresa-a.test');
     await request(app).get('/api/v1/tasks').set(bearer(session)).expect(200);
 
-    await request(app).post('/api/v1/auth/logout').set(bearer(session)).expect(204);
+    await request(app).post('/api/v1/auth/logout').send({ refreshToken: session.refreshToken }).expect(204);
 
     await request(app).get('/api/v1/tasks').set(bearer(session)).expect(401);
     await request(app).post('/api/v1/auth/refresh').send({ refreshToken: session.refreshToken }).expect(401);
@@ -66,8 +66,38 @@ describe('sessão', () => {
     await request(app).get('/api/v1/tasks').set(bearer(await login('gestor@empresa-a.test'))).expect(200);
   });
 
-  it('terminar a sessão exige sessão', async () => {
-    await request(app).post('/api/v1/auth/logout').expect(401);
+  it('terminar a sessão exige a sessão de quem sai, e não se faz com um token de acesso', async () => {
+    const session = await login('gestor@empresa-a.test');
+    await request(app).post('/api/v1/auth/logout').expect(400);
+    await request(app).post('/api/v1/auth/logout').send({ refreshToken: 'nao-e-um-token' }).expect(401);
+    await request(app).post('/api/v1/auth/logout').send({ refreshToken: session.accessToken }).expect(401);
+    // Nenhuma das tentativas terminou a sessão.
+    await request(app).get('/api/v1/tasks').set(bearer(session)).expect(200);
+    // Uma sessão já terminada não se termina outra vez.
+    await request(app).post('/api/v1/auth/logout').send({ refreshToken: session.refreshToken }).expect(204);
+    await request(app).post('/api/v1/auth/logout').send({ refreshToken: session.refreshToken }).expect(401);
+  });
+
+  it('«Sair» termina a sessão mesmo com o token de acesso já expirado', async () => {
+    const session = await login('gestor@empresa-a.test');
+    const otherDevice = await login('gestor@empresa-a.test');
+    // O separador esteve parado: o token de acesso expirou, o de renovação continua válido.
+    const expired = jwt.sign(
+      { typ: 'access', userId: fx.userA.id, companyId: fx.companyA.id, role: 'company_user', tv: 0 },
+      SECRET,
+      { algorithm: 'HS256', issuer: 'p4s-stress-test', expiresIn: -60 },
+    );
+    await request(app).get('/api/v1/tasks').set(asBearer(expired)).expect(401);
+
+    await request(app)
+      .post('/api/v1/auth/logout')
+      .set(asBearer(expired))
+      .send({ refreshToken: session.refreshToken })
+      .expect(204);
+
+    await request(app).post('/api/v1/auth/refresh').send({ refreshToken: session.refreshToken }).expect(401);
+    await request(app).post('/api/v1/auth/refresh').send({ refreshToken: otherDevice.refreshToken }).expect(401);
+    await request(app).get('/api/v1/tasks').set(bearer(otherDevice)).expect(401);
   });
 
   it('um token bem assinado para um utilizador que não existe é recusado', async () => {
@@ -316,9 +346,12 @@ describe('validade da proposta', () => {
     expect((list.body as AssessmentListEntry[])[0]?.proposal.expired).toBe(true);
   });
 
-  it('a P4S reemite: a validade recomeça e os entregáveis por começar deslizam os mesmos dias', async () => {
+  it('a P4S reemite: a validade recomeça e os entregáveis por concluir deslizam os mesmos dias', async () => {
+    // O estado é um campo que a empresa altera: pôr um entregável «em curso» não lhe fixa o prazo.
     const started = detail.tasks.find((t) => t.requirementCode === 'ecovadis') as Task;
-    await request(app).put(`/api/v1/tasks/${started.id}`).set(bearer(consultant)).send({ status: 'in_progress' }).expect(200);
+    await request(app).put(`/api/v1/tasks/${started.id}`).set(bearer(client)).send({ status: 'in_progress' }).expect(200);
+    const done = detail.tasks.find((t) => t.requirementCode === 'carbon_scope_3') as Task;
+    await request(app).put(`/api/v1/tasks/${done.id}`).set(bearer(consultant)).send({ status: 'completed' }).expect(200);
     const internal = await request(app)
       .post('/api/v1/tasks')
       .set(bearer(client))
@@ -333,8 +366,15 @@ describe('validade da proposta', () => {
     expect(response.body.proposal).toEqual({ issuedOn: today, validUntil: addDays(today, 30), validityDays: 30, expired: false });
     const after = new Map((response.body.tasks as Task[]).map((t) => [t.id, t]));
     for (const before of detail.tasks) {
-      const expected = before.id === started.id ? before.deadline : addDays(before.deadline as string, 40);
+      // O que já foi entregue fica com a data em que foi prometido.
+      const expected = before.id === done.id ? before.deadline : addDays(before.deadline as string, 40);
       expect(after.get(before.id)?.deadline, before.title).toBe(expected);
+    }
+    // Nenhum entregável por concluir fica com prazo anterior à nova data de emissão.
+    for (const task of response.body.tasks as Task[]) {
+      if (task.status !== 'completed' && task.executorType !== 'internal') {
+        expect((task.deadline as string) >= today, task.title).toBe(true);
+      }
     }
     // As tarefas internas da empresa não são entregáveis da proposta: ficam como estão.
     expect(after.get(internal.body.id)?.deadline).toBe(addDays(today, 10));

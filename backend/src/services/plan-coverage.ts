@@ -6,7 +6,7 @@
 // e os indicadores leem daqui, para dizerem todos a mesma coisa que o configurador.
 // Funções puras, partilhadas com o frontend.
 
-import type { AssessmentSnapshot, RequirementSnapshot } from '../models/api.types.js';
+import type { RequirementView } from '../models/api.types.js';
 import type { Task, TaskPhase } from '../models/domain.js';
 import { countsTowardsProposal } from './remediation-summary.js';
 
@@ -19,7 +19,7 @@ import { countsTowardsProposal } from './remediation-summary.js';
 export type GapCoverageKind = 'proposal' | 'internal' | 'excluded' | 'removed';
 
 export interface GapLine {
-  requirement: RequirementSnapshot;
+  requirement: RequirementView;
   coverage: GapCoverageKind;
   /** Entregável que responde à lacuna. Null quando foi eliminado. */
   task: Task | null;
@@ -38,7 +38,7 @@ function coverageOf(task: CoverageTask | null): GapCoverageKind {
 }
 
 /** Uma linha por lacuna do diagnóstico, com o estado atual do entregável que lhe responde. */
-export function gapLines(snapshot: Pick<AssessmentSnapshot, 'requirements'>, tasks: readonly Task[]): GapLine[] {
+export function gapLines(snapshot: { requirements: readonly RequirementView[] }, tasks: readonly Task[]): GapLine[] {
   return snapshot.requirements
     .filter((requirement) => requirement.status === 'gap')
     .map((requirement) => {

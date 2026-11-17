@@ -12,6 +12,7 @@ import {
   changePasswordSchema,
   inspectPasswordLinkSchema,
   loginSchema,
+  logoutSchema,
   refreshSchema,
   setPasswordSchema,
 } from '../models/schemas.js';
@@ -21,7 +22,8 @@ export function authRoutes(): Router {
   router.post('/login', loginAddressLimiter, loginLimiter, validate({ body: loginSchema }), authController.login);
   router.post('/refresh', refreshLimiter, validate({ body: refreshSchema }), authController.refresh);
   router.get('/me', authenticate, authController.me);
-  router.post('/logout', authenticate, authController.logout);
+  // Sem token de acesso: quem sai identifica-se com o refresh token (ver authService.logout).
+  router.post('/logout', refreshLimiter, validate({ body: logoutSchema }), authController.logout);
 
   // Links de palavra-passe (convite e recuperação). O token vai no corpo, nunca no URL.
   router.post(

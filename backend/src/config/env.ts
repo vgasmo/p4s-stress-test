@@ -1,10 +1,9 @@
 import 'dotenv/config';
 import { z } from 'zod';
+import { looksGenerated } from '../utils/secret-strength.js';
 
 /** Valores que aparecem em exemplos e documentação. Um segredo conhecido deixa forjar sessões. */
 const PLACEHOLDER_SECRET = /troca-isto|change-?me|changeme|your-?secret/i;
-/** Em produção, uma frase legível também não serve: o segredo tem de ser gerado. */
-const READABLE_SECRET = /segredo|secret|exemplo|example|password|palavra-passe|desenvolvimento|teste/i;
 
 const envSchema = z
   .object({
@@ -66,9 +65,11 @@ const envSchema = z
       .optional()
       .transform((value) => value?.trim() || undefined),
   })
-  .refine((config) => config.NODE_ENV !== 'production' || !READABLE_SECRET.test(config.JWT_SECRET), {
+  // Em produção, uma frase, uma repetição ou uma sequência não servem: quem adivinhar o segredo forja sessões.
+  .refine((config) => config.NODE_ENV !== 'production' || looksGenerated(config.JWT_SECRET), {
     path: ['JWT_SECRET'],
-    message: 'Em produção o JWT_SECRET tem de ser gerado (openssl rand -base64 48), não uma frase.',
+    message:
+      'Em produção o JWT_SECRET tem de ser um valor gerado, não uma frase, uma repetição ou uma sequência. Gere um com: openssl rand -base64 48',
   });
 
 const parsed = envSchema.safeParse(process.env);

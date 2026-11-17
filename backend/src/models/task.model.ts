@@ -253,13 +253,15 @@ export const taskModel = {
   },
 
   /**
-   * Reemissão da proposta: os entregáveis da P4S e do parceiro que ainda não começaram
-   * deslizam o mesmo número de dias, para manterem a duração prometida.
+   * Reemissão da proposta: os entregáveis da P4S e do parceiro por concluir deslizam o mesmo
+   * número de dias, para manterem a duração prometida. Não depende de estarem «por começar»:
+   * o estado é um campo que a empresa altera, e um clique em «Em curso» deixava o entregável
+   * com um prazo anterior à nova data de emissão.
    */
   async shiftPendingDeliverables(db: Queryable, companyId: string, assessmentId: string, days: number): Promise<number> {
     const { rowCount } = await db.query(
       `UPDATE tasks SET deadline = deadline + $3::int, updated_at = CURRENT_TIMESTAMP
-       WHERE company_id = $1 AND assessment_id = $2 AND status = 'backlog'
+       WHERE company_id = $1 AND assessment_id = $2 AND status <> 'completed'
          AND executor_type IN ('p4s', 'partner') AND deadline IS NOT NULL`,
       [companyId, assessmentId, days],
     );

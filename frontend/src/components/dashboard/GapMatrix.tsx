@@ -11,7 +11,7 @@
 
 import { Check, Minus, RotateCcw, X } from 'lucide-react';
 import type { ReactNode } from 'react';
-import type { AssessmentDetail, RequirementSnapshot } from '@engine/models/api.types';
+import type { AssessmentDetail, RequirementView } from '@engine/models/api.types';
 import type { Task, TaskPhase } from '@engine/models/domain';
 import { gapLines, type GapLine } from '@engine/services/plan-coverage';
 import { REQUIREMENTS } from '@engine/services/requirements';
@@ -169,7 +169,7 @@ export function GapMatrix({ assessment, tasks, staff }: GapMatrixProps) {
   );
 }
 
-const noGapText = (row: RequirementSnapshot) => (row.status === 'compliant' ? 'Conforme' : 'Não aplicável sem refinanciamento');
+const noGapText = (row: RequirementView) => (row.status === 'compliant' ? 'Conforme' : 'Não aplicável sem refinanciamento');
 
 interface GapAnswerProps {
   line: GapLine;
@@ -219,7 +219,7 @@ function GapCard({
   staff,
   restoring,
   onRestore,
-}: Omit<GapAnswerProps, 'line'> & { row: RequirementSnapshot; line: GapLine | undefined }) {
+}: Omit<GapAnswerProps, 'line'> & { row: RequirementView; line: GapLine | undefined }) {
   const open = line !== undefined && !line.resolved;
   const terms = line ? answerTerms(line) : null;
   return (
@@ -282,7 +282,7 @@ const DISCLOSURE_SUMMARY =
   'cursor-pointer select-none px-4 py-2.5 font-medium text-slate-900 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-900';
 
 /** O que é cada requisito, em linguagem de fábrica: quem lê o plano pode não ser quem esteve na reunião. */
-function RequirementGlossary({ requirements }: { requirements: RequirementSnapshot[] }) {
+function RequirementGlossary({ requirements }: { requirements: RequirementView[] }) {
   const entries = requirements.flatMap((requirement) => {
     const definition = REQUIREMENTS.find((candidate) => candidate.code === requirement.code);
     return definition ? [{ code: requirement.code, label: requirement.label, summary: definition.summary }] : [];
@@ -326,23 +326,17 @@ function Assumptions({ assessment }: { assessment: AssessmentDetail }) {
           <Line label={`Faturação nos 3 maiores clientes: ${formatPercent(input.topClientsShare)} de ${formatEUR(input.annualRevenue)}`}>
             {formatEUR(snapshot.exposedClientRevenue)}
           </Line>
-          {commercialGaps.map((gap) => (
-            <Line key={gap.code} label={`Sem ${gap.label}${gap.evidence ? ` (${gap.evidence})` : ''}`}>
-              {formatWeight(gap.weightPoints)}
-            </Line>
-          ))}
+          {/* O peso de cada lacuna é do catálogo da P4S: só a equipa o recebe (para as empresas vem a null). */}
+          {commercialGaps.map(
+            (gap) =>
+              gap.weightPoints !== null && (
+                <Line key={gap.code} label={`Sem ${gap.label}${gap.evidence ? ` (${gap.evidence})` : ''}`}>
+                  {formatWeight(gap.weightPoints)}
+                </Line>
+              ),
+          )}
           {commercialGaps.length > 0 && (
-            <Line
-              label={
-                floor !== null
-                  ? `Peso usado: mínimo do bloqueio setorial (a soma das lacunas dava ${formatNumberPt(snapshot.commercialGapPoints / 100, 2)})`
-                  : snapshot.commercialGapPoints > 100
-                    ? `Peso usado: limitado a 1,00 (a soma das lacunas dava ${formatNumberPt(snapshot.commercialGapPoints / 100, 2)})`
-                    : 'Peso usado: soma das lacunas'
-              }
-            >
-              {formatNumberPt(weightUsed / 100, 2)}
-            </Line>
+            <Line label={weightUsedLabel(snapshot.commercialGapPoints, floor !== null)}>{formatNumberPt(weightUsed / 100, 2)}</Line>
           )}
           <Line label="Carteira comercial exposta (faturação comercial em risco): faturação nos 3 maiores clientes × peso usado" strong>
             {formatEUR(assessment.commercialRevenueAtRisk)}
@@ -365,6 +359,18 @@ function Assumptions({ assessment }: { assessment: AssessmentDetail }) {
   );
 }
 
+/** Como se chegou ao peso usado. Sem a soma das lacunas (contas das empresas), diz só o que o peso é. */
+function weightUsedLabel(gapPoints: number | null, floorApplied: boolean): string {
+  if (gapPoints === null) {
+    return floorApplied
+      ? 'Peso usado (parte dessa faturação considerada em risco): mínimo do bloqueio setorial'
+      : 'Peso usado (parte dessa faturação considerada em risco)';
+  }
+  const sum = `a soma das lacunas dava ${formatNumberPt(gapPoints / 100, 2)}`;
+  if (floorApplied) return `Peso usado: mínimo do bloqueio setorial (${sum})`;
+  return gapPoints > 100 ? `Peso usado: limitado a 1,00 (${sum})` : 'Peso usado: soma das lacunas';
+}
+
 function Line({ label, strong, children }: { label: string; strong?: boolean; children: ReactNode }) {
   return (
     <>
@@ -374,7 +380,7 @@ function Line({ label, strong, children }: { label: string; strong?: boolean; ch
   );
 }
 
-function StatusIcon({ status, resolved }: { status: RequirementSnapshot['status']; resolved: boolean }) {
+function StatusIcon({ status, resolved }: { status: RequirementView['status']; resolved: boolean }) {
   if (status === 'gap' && !resolved) {
     return (
       <span className="flex size-4 items-center justify-center rounded-sm bg-rose-100 text-rose-700" title="Lacuna">

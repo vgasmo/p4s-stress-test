@@ -102,7 +102,7 @@ Sem as dependências de desenvolvimento (`npm ci --omit=dev`), a migração e o 
 | Variável | Para quê |
 | --- | --- |
 | `DATABASE_URL` | Ligação ao PostgreSQL |
-| `JWT_SECRET` | Segredo HS256, mínimo 32 caracteres, gerado (`openssl rand -base64 48`). Valores de exemplo são recusados |
+| `JWT_SECRET` | Segredo HS256, mínimo 32 caracteres, gerado (`openssl rand -base64 48`). Valores de exemplo são recusados. Em produção só é aceite um valor com a forma de um segredo gerado (hexadecimal com 64 ou mais caracteres, ou base64 com 43 ou mais): frases, repetições e sequências são recusadas |
 | `JWT_ACCESS_TTL_SECONDS`, `JWT_REFRESH_TTL_SECONDS` | Validade dos tokens (15 minutos e 7 dias por omissão) |
 | `SESSION_MAX_TTL_SECONDS` | Duração máxima de uma sessão, por muito que seja renovada (30 dias) |
 | `TRUST_PROXY` | Número de proxies à frente da API. 0 no próprio computador, 1 atrás de um proxy. Com 0 atrás de um proxy, os limites de pedidos tratam todos os clientes como um só |
@@ -198,7 +198,7 @@ Os valores em risco são os do dia do diagnóstico. Não descem quando um entreg
 ## Proposta
 
 - A proposta tem data de emissão guardada no servidor (a do diagnóstico) e vale 30 dias. A validade é a mesma para toda a gente e não muda com o dia em que se imprime.
-- Passado o prazo, o plano e o resumo dizem que a proposta expirou. A equipa P4S reemite-a com a data do dia, e os entregáveis que ainda não começaram deslizam o mesmo número de dias.
+- Passado o prazo, o plano e o resumo dizem que a proposta expirou. A equipa P4S reemite-a com a data do dia, e os entregáveis da P4S e do parceiro por concluir deslizam o mesmo número de dias. Não depende de estarem «por começar»: o estado é um campo que a empresa altera.
 - O resumo impresso diz que os prazos são calculados para adjudicação na data de emissão e que deslizam se a adjudicação for posterior.
 - Sem entregáveis da P4S ou do parceiro, o resumo regista o diagnóstico e não leva bloco de aceitação.
 
@@ -240,8 +240,8 @@ Para a tabela de preços e o modelo não ficarem públicos, quem não é da equi
 
 - **Isolamento por empresa.** Todas as queries a `assessments` e `tasks` filtram por `company_id = $1`, e esse valor vem só da sessão. Há um teste que lê o SQL de todo o código da API e falha se aparecer uma query a essas tabelas sem o filtro.
 - **Papéis.** `admin` e `consultant` são a equipa P4S e escolhem a empresa em que estão a trabalhar. `company_user` fica sempre na sua empresa.
-- **Conta de uma empresa.** Acompanha o plano. Nas tarefas do diagnóstico e nas criadas pela P4S atualiza o estado e o responsável, e mais nada: âmbito, prazo, preço, executor, fase e inclusão na proposta são da P4S, seja qual for o executor do momento. Cria tarefas internas e altera as que criou. Não elimina tarefas, não grava diagnósticos e não recebe os pesos nem a tabela de preços (simula por escalões).
-- **Gestão de utilizadores.** Administradores e consultores gerem os utilizadores da empresa que têm selecionada. Só o administrador gere a equipa P4S. Ninguém desativa a própria conta e fica sempre pelo menos um administrador que consegue entrar.
+- **Conta de uma empresa.** Acompanha o plano. Nas tarefas do diagnóstico e nas criadas pela P4S atualiza o estado e o responsável, e mais nada: âmbito, prazo, preço, executor, fase e inclusão na proposta são da P4S, seja qual for o executor do momento. Cria tarefas internas e altera as que criou. Não elimina tarefas, não grava diagnósticos e não recebe os pesos nem a tabela de preços: simula por escalões e, no seu diagnóstico, recebe o resultado, o score, o piso setorial e o agravamento de spread (o que o resumo impresso já lhe dá), sem o peso de cada requisito, sem a soma das lacunas e sem os preços e prazos de catálogo. Os preços que vê são os da sua proposta.
+- **Gestão de utilizadores.** Administradores e consultores gerem os utilizadores da empresa que têm selecionada. Só o administrador gere a equipa P4S. Ninguém desativa a própria conta e fica sempre pelo menos um administrador que consegue entrar, mesmo com dois pedidos de desativação em simultâneo. Um convite de administrador por usar desativa-se sempre.
 
 ## Sessão, utilizadores e palavras-passe
 
@@ -249,7 +249,8 @@ Não há envio de email. A equipa P4S cria a conta sem palavra-passe e recebe um
 
 - Na base de dados fica só o SHA-256 do token. O link é mostrado uma vez e gerar um novo anula o anterior.
 - O token vai no fragmento do endereço (`#token=…`), que o browser não envia a servidores nem fica em registos de acesso.
-- Cada pedido confirma na base de dados que a conta existe, está ativa e tem a mesma versão de sessão do token. «Sair», mudar a palavra-passe e desativar a conta sobem essa versão: as sessões abertas terminam no pedido seguinte, em todos os dispositivos.
+- Cada pedido confirma na base de dados que a conta existe, está ativa e tem a mesma versão de sessão do token. «Sair», mudar a palavra-passe e desativar a conta sobem essa versão: as sessões abertas terminam no pedido seguinte, em todos os dispositivos. As três anulam também os links de palavra-passe por usar.
+- «Sair» identifica-se com o token de renovação, que vale enquanto a sessão existir. Assim termina a sessão no servidor mesmo que o separador tenha estado parado mais do que os 15 minutos do token de acesso.
 - Uma sessão renova-se durante 30 dias, no máximo. Depois é preciso entrar outra vez.
 - O login aceita 10 tentativas falhadas por endereço e email em 15 minutos, para que as tentativas contra uma conta não bloqueiem as outras pessoas do mesmo escritório.
 - Palavras-passe com pelo menos 10 caracteres e no máximo 72 bytes (o bcrypt ignora o que passa disso).
