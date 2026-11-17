@@ -108,7 +108,7 @@ Sem as dependências de desenvolvimento (`npm ci --omit=dev`), a migração e o 
 | `TRUST_PROXY` | Número de proxies à frente da API. 0 no próprio computador, 1 atrás de um proxy. Com 0 atrás de um proxy, os limites de pedidos tratam todos os clientes como um só |
 | `ALLOW_INSECURE_HTTP` | `true` permite HTTP simples fora de localhost. Desligado por omissão |
 | `STATIC_DIR` | Pasta do frontend compilado, para a API o servir |
-| `P4S_CONTACT_EMAIL` | Contacto mostrado a quem faz a simulação sem ter conta |
+| `P4S_CONTACT_EMAIL` | Contacto mostrado a quem faz a simulação sem ter conta e no ecrã de entrada: botão «Pedir o diagnóstico completo», que abre uma mensagem já com a simulação feita. Vazio, a página diz só que o diagnóstico é feito com a equipa Plan4Sustain |
 | `P4S_LEGAL_IDENTITY` | Quem emite a proposta (denominação, NIF, morada), impresso no resumo |
 | `P4S_PROPOSAL_TERMS` | Condições impressas no resumo (IVA, pagamento, quem é o parceiro), separadas por `\|` |
 | `SEED_*` | Administrador inicial e dados de demonstração. `SEED_DEMO_PASSWORD` é a palavra-passe da conta da fábrica de demonstração |
@@ -271,4 +271,7 @@ Não há envio de email. A equipa P4S cria a conta sem palavra-passe e recebe um
 - O resumo executivo é gerado no browser («Guardar como PDF» na janela de impressão). Não há geração de PDF no servidor.
 - `npm audit` está limpo nas dependências de produção. Nas de desenvolvimento resta um aviso do `picomatch` (usado pelo Vite, pelo Vitest e pelo Tailwind), que à data não tem versão corrigida publicada.
 - Os `package-lock.json` devem ser mantidos. Gerá-los do zero com npm 10.9 falha por um defeito do npm a resolver as dependências do Vitest 4. Com os ficheiros presentes, ou com npm 11, instala sem problemas.
-- O ambiente de Codespaces foi escrito a partir do modelo oficial. Os scripts de preparação e de arranque e o percurso de browser foram testados fora do contentor, numa cópia limpa. O contentor em si não foi corrido.
+- **A conta de uma empresa não vê o peso de cada lacuna.** No bloco «De onde vêm os números» vê a base, o peso usado e o resultado. O peso de cada requisito, a soma das lacunas e os preços e prazos de catálogo ficam na equipa P4S, também na API.
+- **Eliminar um diagnóstico repõe a ficha da empresa.** Se era o mais recente e a ficha ainda tinha o setor e a faturação dele, volta ao que tinha antes. Uma ficha corrigida à mão fica como está.
+- **«Sair» não anula um link de palavra-passe por usar.** Mudar a palavra-passe e desativar a conta anulam-no.
+- O ambiente de teste foi corrido em contentores, com as imagens que o Codespaces usa (`mcr.microsoft.com/devcontainers/typescript-node:22` e `postgres:16`), a partir de um clone limpo: preparação, arranque e o percurso completo no browser. Os dois jobs do CI foram corridos da mesma forma, passo a passo, com as variáveis de cada job. Não foram corridos na infraestrutura do GitHub: o encaminhamento de portas do Codespaces e os runners do Actions ficam por confirmar no primeiro uso.

@@ -49,8 +49,10 @@ export function useStressTestPreview(
     try {
       const result = calculator.calculate(input);
       return { result, suggestedTasks: generator.generate(result.gaps, todayInLisbon()) };
-    } catch (error) {
-      return { error: error instanceof Error ? error.message : 'Dados inválidos.' };
+    } catch {
+      // O motor só recusa valores fora dos limites. A mensagem dele usa os nomes dos campos
+      // do cálculo, que não dizem nada a quem está a preencher.
+      return { error: 'Há um valor fora dos limites aceites (máximo 999.999.999.999,99 €). Reveja a faturação anual e o crédito a refinanciar.' };
     }
     // O input é comparado pelo conteúdo (key), não pela identidade do objeto.
   }, [calculator, key]);

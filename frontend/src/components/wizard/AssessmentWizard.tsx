@@ -20,6 +20,7 @@ import { errorMessage, type CreateAssessmentPayload } from '@/lib/api';
 import { diagnosisRequestMailto } from '@/lib/contact';
 import {
   SECTOR_PROFILE_LABELS,
+  formatBasisPoints,
   formatCompactEUR,
   formatEUR,
   formatEuroRange,
@@ -437,7 +438,7 @@ export function AssessmentWizard() {
               const impact = !catalog.data
                 ? null
                 : requirement.channel === 'financial'
-                  ? `${catalog.data.spreadPenaltyBps} bps/ano sobre o crédito`
+                  ? `${formatBasisPoints(catalog.data.spreadPenaltyBps)} ao ano sobre o crédito`
                   : `${formatWeight(forSector(catalog.data.parameters[requirement.code].weightPoints, state.sectorProfile))} na exposição`;
               return (
                 <li key={requirement.code} className={cn('flex items-center gap-4 px-4 py-3', notApplicable && 'bg-slate-50')}>

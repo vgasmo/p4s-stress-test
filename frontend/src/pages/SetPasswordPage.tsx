@@ -112,7 +112,7 @@ export function SetPasswordPage() {
         <p className="mt-2 text-sm leading-relaxed text-slate-700">
           {info.purpose === 'invite'
             ? 'Defina a palavra-passe para entrar no stress test de qualificação da Plan4Sustain. Depois disso entra sempre com o seu email.'
-            : 'Defina uma palavra-passe nova. As sessões abertas com a anterior terminam em poucos minutos.'}
+            : 'Defina uma palavra-passe nova. As sessões abertas com a anterior terminam de imediato.'}
         </p>
         <p className="mt-2 text-xs text-slate-600">
           Este link funciona uma só vez e é válido até{' '}

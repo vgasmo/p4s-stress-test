@@ -56,7 +56,7 @@ export function ChangePasswordSheet({ open, onOpenChange }: ChangePasswordSheetP
           <SheetHeader>
             <SheetTitle>Alterar palavra-passe</SheetTitle>
             <SheetDescription id="change-password-description">
-              As sessões abertas noutros dispositivos terminam em poucos minutos.
+              As sessões abertas noutros dispositivos terminam de imediato.
             </SheetDescription>
           </SheetHeader>
           <SheetBody>

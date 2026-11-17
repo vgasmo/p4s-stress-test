@@ -29,6 +29,7 @@ import {
   exactValueTitle,
   formatApproxEUR,
   formatApproxPerYear,
+  formatBasisPoints,
   formatEUR,
   formatEuroRange,
   formatNumberPt,
@@ -283,7 +284,7 @@ function fullPreview(
                 })}
                 <li className="flex justify-between gap-3">
                   <span>Agravamento de spread sem rácios ESG</span>
-                  <span className={FIGURE}>{catalog.spreadPenaltyBps} bps/ano</span>
+                  <span className={FIGURE}>{formatBasisPoints(catalog.spreadPenaltyBps)} ao ano</span>
                 </li>
               </ul>
             </div>
@@ -305,7 +306,7 @@ function fullPreview(
                 ? 'Sem refinanciamento'
                 : result.evaluations.some((e) => e.requirement.code === 'banking_esg' && e.status === 'compliant')
                   ? 'Com rácios ESG, sem agravamento'
-                  : `${catalog.spreadPenaltyBps} bps sobre ${formatEUR(creditLineToRefinance)}`}
+                  : `${formatBasisPoints(catalog.spreadPenaltyBps)} ao ano sobre ${formatEUR(creditLineToRefinance)}`}
           </Metric>
           <Metric label="Bloqueadores críticos" value={String(result.criticalGapCount)} tone={result.criticalGapCount > 0 ? 'rose' : 'plain'}>
             prioridade crítica

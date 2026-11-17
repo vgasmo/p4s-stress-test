@@ -123,7 +123,7 @@ await page.getByText('agravamento de spread').waitFor();
 await settle();
 const publicText = await page.locator('body').innerText();
 expectEq('sem sessão: a página não mostra preços', /\d\.\d{3}\s€(?!\/ano)/.test(publicText.split('O que falta')[1] ?? ''), false);
-expectEq('sem sessão: a página não mostra pesos', /na exposição|bps/.test(publicText), false);
+expectEq('sem sessão: a página não mostra pesos', /na exposição|bps|% ao ano/.test(publicText), false);
 expectEq('sem sessão: o catálogo não é servido', (await page.request.get(`${BASE}/api/v1/catalog`)).status(), 401);
 await page.screenshot({ path: `${OUT}/01-wizard-anonimo.png`, fullPage: true });
 
@@ -137,7 +137,7 @@ await expectText('empresa: a simulação mantém-se, por escalões', 'preview-re
 await settle();
 const companySession = await storedSession();
 expectEq('empresa: o catálogo não é servido', await apiStatus('/catalog', companySession.accessToken), 403);
-expectEq('empresa: a página não mostra pesos', /na exposição|bps/.test(await page.locator('body').innerText()), false);
+expectEq('empresa: a página não mostra pesos', /na exposição|bps|% ao ano/.test(await page.locator('body').innerText()), false);
 expectEq('empresa: não grava diagnósticos', await page.getByRole('button', { name: /Guardar Diagnóstico/ }).count(), 0);
 await page.getByRole('link', { name: 'Abrir o plano de ação da empresa' }).waitFor();
 await logout();
