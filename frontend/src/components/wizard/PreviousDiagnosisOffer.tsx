@@ -12,6 +12,8 @@ interface PreviousDiagnosisOfferProps {
   record: CompanyRecord;
   /** Setor e faturação que estão agora no formulário. */
   current: CompanyRecord;
+  /** O consultor já mexeu no formulário: as respostas dele são substituídas. */
+  touched: boolean;
   onApply: (answers: PreviousAnswers) => void;
   onUseRecord: (record: Partial<CompanyRecord>) => void;
 }
@@ -20,7 +22,7 @@ interface PreviousDiagnosisOfferProps {
  * Equipa P4S, numa empresa que já tem um diagnóstico: oferece partir das respostas dele. O
  * formulário abre sempre com tudo por fazer e as respostas anteriores só entram a pedido.
  */
-export function PreviousDiagnosisOffer({ record, current, onApply, onUseRecord }: PreviousDiagnosisOfferProps) {
+export function PreviousDiagnosisOffer({ record, current, touched, onApply, onUseRecord }: PreviousDiagnosisOfferProps) {
   const { latest, answers } = usePreviousDiagnosis();
   const [applied, setApplied] = useState<{ when: string; answers: PreviousAnswers } | null>(null);
 
@@ -84,8 +86,10 @@ export function PreviousDiagnosisOffer({ record, current, onApply, onUseRecord }
       <p>
         Esta empresa tem um diagnóstico de <span className="font-mono tabular-nums text-slate-900">{when}</span> (score{' '}
         <span className="font-mono tabular-nums text-slate-900">{latest.riskScore}</span>
-        {latest.conductedByName ? `, feito por ${latest.conductedByName}` : ''}). Este formulário abre com tudo por fazer.
-        Numa revisão, parta das respostas desse diagnóstico e mude só o que for diferente.
+        {latest.conductedByName ? `, feito por ${latest.conductedByName}` : ''}).{' '}
+        {touched
+          ? 'Pode partir das respostas desse diagnóstico. As que já deu neste formulário são substituídas.'
+          : 'Este formulário abre com tudo por fazer. Numa revisão, parta das respostas desse diagnóstico e mude só o que for diferente.'}
       </p>
       {answers.isError && (
         <ErrorBanner

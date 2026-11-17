@@ -276,6 +276,7 @@ export function AssessmentWizard() {
                 key={`${company.id}-${draft.revision}`}
                 record={company}
                 current={state}
+                touched={state.touched}
                 onApply={(answers) => {
                   draft.applyAnswers(answers);
                   resetAmountFields();
