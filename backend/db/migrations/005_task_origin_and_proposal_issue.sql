@@ -166,7 +166,8 @@ DECLARE
 BEGIN
     SELECT string_agg(emails, '; ') INTO duplicated
     FROM (
-        SELECT string_agg(email, ', ' ORDER BY email) AS emails
+        -- Ordem igual em qualquer configuração regional da base de dados.
+        SELECT string_agg(email, ', ' ORDER BY email COLLATE "C") AS emails
         FROM users GROUP BY lower(email) HAVING count(*) > 1
     ) repeated;
     IF duplicated IS NOT NULL THEN
