@@ -1,5 +1,5 @@
-import { ArrowRight, Building2, ClipboardList, LogIn, RotateCcw } from 'lucide-react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { ArrowRight, Building2, ClipboardList, LogIn, Mail, RotateCcw } from 'lucide-react';
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { SECTOR_PROFILES } from '@engine/models/domain';
 import { REQUIREMENTS, describeSources, forSector, requirementStatus } from '@engine/services/requirements';
@@ -16,10 +16,12 @@ import { Switch } from '@/components/ui/switch';
 import { useCompanies, useMe } from '@/hooks/useAuth';
 import { useCatalog, useCreateAssessment, usePublicSimulation, useStressTestPreview } from '@/hooks/useAssessment';
 import { errorMessage, type CreateAssessmentPayload } from '@/lib/api';
+import { P4S_CONTACT_EMAIL, diagnosisRequestMailto } from '@/lib/contact';
 import {
   SECTOR_PROFILE_LABELS,
   formatCompactEUR,
   formatEUR,
+  formatEuroRange,
   formatNumberPt,
   formatWeight,
 } from '@/lib/formatters';
@@ -27,6 +29,10 @@ import { isStaffSession, useSession } from '@/lib/session';
 import { cn } from '@/lib/utils';
 import type { PlanNavigationState } from '@/pages/ActionPlanPage';
 import { LiveImpactPreview } from './LiveImpactPreview';
+import { PreviousDiagnosisOffer } from './PreviousDiagnosisOffer';
+import { applyPreviousAnswers, type PreviousAnswers } from './previous-answers';
+import { RadioTiles } from './RadioTiles';
+import { useAppHeaderHeight, useElementHeight } from './useElementHeight';
 import {
   DEFAULT_STATE,
   applyToSessionCompany,
@@ -47,6 +53,7 @@ import {
 /** anonymous: visitante. company: conta de uma empresa (só simula). staff: equipa P4S (grava). */
 type WizardMode = 'anonymous' | 'company' | 'staff';
 
+const SECTOR_OPTIONS = SECTOR_PROFILES.map((sector) => ({ value: sector, label: SECTOR_PROFILE_LABELS[sector] }));
 const REVENUE_PRESETS = [2_000_000, 5_000_000, 10_000_000, 25_000_000];
 const CREDIT_PRESETS = [1_000_000, 2_500_000, 5_000_000];
 
@@ -57,6 +64,13 @@ const CREDIT_PRESETS = [1_000_000, 2_500_000, 5_000_000];
 function useWizardDraft(ctx: DraftContext | undefined) {
   const [state, setState] = useState<WizardState>(loadDraft);
   const [setAside, setSetAside] = useState<WizardState | null>(loadSetAside);
+  // Conta as vezes em que as respostas foram trocadas de uma só vez (recomeçar, outra empresa,
+  // simulação que estava de parte): os campos largam o texto que tinham a meio.
+  const [revision, setRevision] = useState(0);
+  const replace = (next: WizardState) => {
+    setState(next);
+    setRevision((current) => current + 1);
+  };
   useEffect(() => saveDraft(state), [state]);
   useEffect(() => saveSetAside(setAside), [setAside]);
 
@@ -67,26 +81,29 @@ function useWizardDraft(ctx: DraftContext | undefined) {
   if (ctx && contextKey !== reconciledFor) {
     const next = reconcileDraft(state, ctx);
     setReconciledFor(contextKey);
-    if (next.draft !== state) setState(next.draft);
+    if (next.draft !== state) replace(next.draft);
     if (next.setAside) setSetAside(next.setAside);
   }
 
   return {
     state,
     setAside,
+    revision,
     /** Alteração feita pelo utilizador. */
     update: (patch: Partial<WizardState>) => setState((current) => ({ ...current, ...patch, touched: true })),
+    /** Respostas de um diagnóstico anterior, pedidas pelo consultor. */
+    applyAnswers: (answers: PreviousAnswers) => setState((current) => applyPreviousAnswers(current, answers)),
     /** Liga ou desliga o registo de uma empresa nova: em ambos os casos começa com o formulário limpo. */
-    setNewCompany: (on: boolean) => ctx && setState(on ? newCompanyDraft(ctx) : freshDraft(ctx)),
-    restart: () => ctx && setState(state.newCompany ? newCompanyDraft(ctx) : freshDraft(ctx)),
+    setNewCompany: (on: boolean) => ctx && replace(on ? newCompanyDraft(ctx) : freshDraft(ctx)),
+    restart: () => ctx && replace(state.newCompany ? newCompanyDraft(ctx) : freshDraft(ctx)),
     applySetAside: () => {
       if (!ctx || !setAside) return;
-      setState(applyToSessionCompany(setAside, ctx));
+      replace(applyToSessionCompany(setAside, ctx));
       setSetAside(null);
     },
     resumeSetAside: () => {
       if (!ctx || !setAside) return;
-      setState(resumeAsNewCompany(setAside, ctx));
+      replace(resumeAsNewCompany(setAside, ctx));
       setSetAside(null);
     },
     discardSetAside: () => setSetAside(null),
@@ -94,7 +111,7 @@ function useWizardDraft(ctx: DraftContext | undefined) {
     clear: () => {
       clearWizardDrafts();
       setSetAside(null);
-      setState({ ...DEFAULT_STATE, owner: ctx?.userId ?? null });
+      replace({ ...DEFAULT_STATE, owner: ctx?.userId ?? null });
     },
   };
 }
@@ -107,6 +124,13 @@ export function AssessmentWizard() {
   const navigate = useNavigate();
   const createAssessment = useCreateAssessment();
   const [triedSave, setTriedSave] = useState(false);
+  // Campos em euros com texto que não foi percebido: o valor em vigor é o anterior, por isso
+  // não se grava enquanto lá estiver.
+  const [unread, setUnread] = useState({ revenue: false, credit: false });
+  // Um botão rápido repõe o campo, mesmo que o valor escolhido seja o que já lá estava.
+  const [picks, setPicks] = useState({ revenue: 0, credit: 0 });
+  const headerHeight = useAppHeaderHeight();
+  const [pinnedRef, pinnedHeight] = useElementHeight<HTMLDivElement>();
 
   const company = me.data?.company ?? null;
   const ctx: DraftContext | undefined =
@@ -146,7 +170,22 @@ export function AssessmentWizard() {
   const typedName = state.companyName.trim();
   const nifValid = isValidNif(typedNif);
   const nameValid = typedName.length >= 2;
-  const canSave = staff && (!quickCreate || (nifValid && nameValid)) && state.annualRevenue > 0;
+  // Refinanciamento ligado sem montante: para o cálculo é como se não houvesse refinanciamento,
+  // por isso o ecrã pede o montante em vez de dar a banca como não aplicável.
+  const creditMissing = state.hasRefinancing && state.creditLineToRefinance <= 0;
+  // O que falta para gravar, dito junto ao botão. Uma coisa de cada vez, pela ordem do ecrã.
+  const saveBlocker = !staff
+    ? null
+    : quickCreate && !(nifValid && nameValid)
+      ? 'Complete o nome e o NIF da empresa antes de guardar.'
+      : unread.revenue || unread.credit
+        ? 'Corrija o valor assinalado antes de guardar.'
+        : state.annualRevenue <= 0
+          ? 'Indique a faturação anual antes de guardar.'
+          : creditMissing
+            ? 'Indique o montante a refinanciar, ou desligue o refinanciamento, antes de guardar.'
+            : null;
+  const canSave = staff && saveBlocker === null;
   // Empresa já registada com o NIF que está a ser escrito: o diagnóstico vai para ela.
   const existingByNif = quickCreate && nifValid ? companies.data?.find((entry) => entry.nif === typedNif) : undefined;
   // Onde o diagnóstico fica gravado, dito por extenso ao lado do botão.
@@ -176,11 +215,46 @@ export function AssessmentWizard() {
     });
   };
 
+  const pickAmount = (field: 'revenue' | 'credit', patch: Partial<WizardState>) => {
+    update(patch);
+    setPicks((current) => ({ ...current, [field]: current[field] + 1 }));
+  };
+  const resetAmountFields = () => setPicks((current) => ({ revenue: current.revenue + 1, credit: current.credit + 1 }));
+
+  // Visitante sem conta: o passo seguinte é pedir o diagnóstico completo à equipa, por email,
+  // já com o que simulou. Só existe se quem publicou tiver indicado o endereço de contacto.
+  const simulatedRisk = publicSimulation.isPlaceholderData ? null : publicSimulation.data?.commercialRisk;
+  const requestHref =
+    mode === 'anonymous' && P4S_CONTACT_EMAIL
+      ? diagnosisRequestMailto(
+          P4S_CONTACT_EMAIL,
+          state.annualRevenue > 0
+            ? {
+                sector: SECTOR_PROFILE_LABELS[state.sectorProfile],
+                annualRevenue: formatEUR(state.annualRevenue),
+                topClientsShare: `${state.topClientsShare}%`,
+                atRisk: simulatedRisk ? formatEuroRange(simulatedRisk.low, simulatedRisk.high) : null,
+              }
+            : undefined,
+        )
+      : null;
+
   const dealbreaker = catalog.data?.dealbreakers.find((rule) => rule.sector === state.sectorProfile);
   const spreadBps = catalog.data?.spreadPenaltyBps;
 
   return (
-    <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_420px]">
+    <div
+      className={cn(
+        // Em ecrãs estreitos é uma coluna (e não uma grelha), para o número em risco poder
+        // ficar preso ao topo ao longo de todo o formulário.
+        'flex flex-col gap-6 lg:grid lg:grid-cols-[minmax(0,1fr)_420px] lg:items-start',
+        // Um controlo que recebe o foco é trazido para baixo do que está preso no topo (o
+        // cabeçalho e, em ecrãs estreitos, o número em risco), e não para trás disso.
+        '[--focus-top:calc(var(--pin-top)_+_var(--pin-height)_+_0.75rem)] lg:[--focus-top:calc(var(--pin-top)_+_0.75rem)]',
+        '[&_:is(a,button,input,summary,[role=slider])]:scroll-mt-[var(--focus-top)]',
+      )}
+      style={{ '--pin-top': `${headerHeight}px`, '--pin-height': `${pinnedHeight}px` } as CSSProperties}
+    >
       <div className="space-y-4">
         <CompanyBlock
           mode={mode}
@@ -195,6 +269,25 @@ export function AssessmentWizard() {
           showErrors={triedSave}
           nifValid={nifValid}
           nameValid={nameValid}
+          previousDiagnosis={
+            staff && company && !quickCreate ? (
+              <PreviousDiagnosisOffer
+                // Outra empresa, ou «Recomeçar», volta à oferta.
+                key={`${company.id}-${draft.revision}`}
+                record={company}
+                current={state}
+                touched={state.touched}
+                onApply={(answers) => {
+                  draft.applyAnswers(answers);
+                  resetAmountFields();
+                }}
+                onUseRecord={(record) => {
+                  update(record);
+                  resetAmountFields();
+                }}
+              />
+            ) : null
+          }
         />
         {staff && draft.setAside && (
           <SetAsideNotice
@@ -214,30 +307,17 @@ export function AssessmentWizard() {
             </div>
           </CardHeader>
           <CardContent className="space-y-5">
-            <fieldset className="space-y-2">
-              <legend className="text-xs font-medium text-slate-700">Perfil setorial</legend>
-              <div role="radiogroup" aria-label="Perfil setorial" className="grid grid-cols-2 gap-2 xl:grid-cols-4">
-                {SECTOR_PROFILES.map((sector) => {
-                  const checked = state.sectorProfile === sector;
-                  return (
-                    <button
-                      key={sector}
-                      type="button"
-                      role="radio"
-                      aria-checked={checked}
-                      onClick={() => update({ sectorProfile: sector })}
-                      className={cn(
-                        'rounded-md border px-3 py-2 text-left text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900',
-                        checked
-                          ? 'border-slate-900 bg-slate-900 text-white'
-                          : 'border-slate-300 bg-white text-slate-800 hover:border-slate-400 hover:bg-slate-50',
-                      )}
-                    >
-                      {SECTOR_PROFILE_LABELS[sector]}
-                    </button>
-                  );
-                })}
-              </div>
+            <div className="space-y-2">
+              <p id="sector-label" className="text-xs font-medium text-slate-700">
+                Perfil setorial
+              </p>
+              <RadioTiles
+                labelledBy="sector-label"
+                value={state.sectorProfile}
+                options={SECTOR_OPTIONS}
+                onChange={(sectorProfile) => update({ sectorProfile })}
+                className="grid grid-cols-2 gap-2 xl:grid-cols-4"
+              />
               {catalog.data && (
                 <FieldHint>
                   {dealbreaker
@@ -247,13 +327,24 @@ export function AssessmentWizard() {
                     : 'Sem piso de bloqueio neste setor. Contam só os pesos das lacunas.'}
                 </FieldHint>
               )}
-            </fieldset>
+            </div>
 
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="annual-revenue">Faturação anual</Label>
-                <EuroInput id="annual-revenue" value={state.annualRevenue} onValueChange={(annualRevenue) => update({ annualRevenue })} />
-                <Presets values={REVENUE_PRESETS} current={state.annualRevenue} onPick={(annualRevenue) => update({ annualRevenue })} label="Faturação" />
+                <EuroInput
+                  key={`${draft.revision}-${picks.revenue}`}
+                  id="annual-revenue"
+                  value={state.annualRevenue}
+                  onValueChange={(annualRevenue) => update({ annualRevenue })}
+                  onInvalidChange={(revenue) => setUnread((current) => ({ ...current, revenue }))}
+                />
+                <Presets
+                  values={REVENUE_PRESETS}
+                  current={state.annualRevenue}
+                  onPick={(annualRevenue) => pickAmount('revenue', { annualRevenue })}
+                  label="Faturação"
+                />
               </div>
 
               <div className="space-y-2">
@@ -263,6 +354,7 @@ export function AssessmentWizard() {
                 </div>
                 <Slider
                   aria-labelledby="share-label"
+                  formatValue={(value) => `${value}%`}
                   min={10}
                   max={100}
                   step={1}
@@ -302,11 +394,25 @@ export function AssessmentWizard() {
               <div className="grid grid-cols-1 gap-2 border-l-2 border-slate-200 pl-4 md:max-w-md">
                 <Label htmlFor="credit-line">Montante a refinanciar</Label>
                 <EuroInput
+                  key={`${draft.revision}-${picks.credit}`}
                   id="credit-line"
                   value={state.creditLineToRefinance}
                   onValueChange={(creditLineToRefinance) => update({ creditLineToRefinance })}
+                  onInvalidChange={(credit) => setUnread((current) => ({ ...current, credit }))}
+                  aria-invalid={creditMissing && triedSave ? true : undefined}
+                  aria-describedby={creditMissing ? 'credit-line-missing' : undefined}
                 />
-                <Presets values={CREDIT_PRESETS} current={state.creditLineToRefinance} onPick={(creditLineToRefinance) => update({ creditLineToRefinance })} label="Crédito" />
+                {creditMissing && !unread.credit && (
+                  <FieldHint id="credit-line-missing" className="font-medium text-amber-800">
+                    Indique o montante a refinanciar. Enquanto estiver a 0&nbsp;€, a banca não entra no cálculo.
+                  </FieldHint>
+                )}
+                <Presets
+                  values={CREDIT_PRESETS}
+                  current={state.creditLineToRefinance}
+                  onPick={(creditLineToRefinance) => pickAmount('credit', { creditLineToRefinance })}
+                  label="Crédito"
+                />
               </div>
             )}
           </CardContent>
@@ -324,6 +430,7 @@ export function AssessmentWizard() {
               const field = requirement.answerField;
               const status = requirementStatus(requirement, input);
               const notApplicable = status === 'not_applicable';
+              const amountMissing = notApplicable && creditMissing;
               // O peso só é conhecido com sessão (vem com o catálogo).
               const impact = !catalog.data
                 ? null
@@ -338,11 +445,15 @@ export function AssessmentWizard() {
                     </label>
                     <p className="text-xs text-slate-600">
                       Exigido por {describeSources(requirement.requiredBy)}
-                      {notApplicable ? ' · só conta com refinanciamento a <18 meses' : ''}
+                      {amountMissing
+                        ? ' · falta o montante a refinanciar'
+                        : notApplicable
+                          ? ' · só conta com refinanciamento a <18 meses'
+                          : ''}
                     </p>
                   </div>
                   {impact && <span className="hidden font-mono text-xs tabular-nums text-slate-700 sm:block">{impact}</span>}
-                  <StatusPill status={status} />
+                  {amountMissing ? <Badge tone="high">Falta o montante</Badge> : <StatusPill status={status} />}
                   <Switch
                     id={`req-${requirement.code}`}
                     checked={state[field]}
@@ -377,15 +488,17 @@ export function AssessmentWizard() {
         sectorProfile={state.sectorProfile}
         annualRevenue={state.annualRevenue}
         creditLineToRefinance={input.creditLineToRefinance}
-        onUseSampleRevenue={() => update({ annualRevenue: 5_000_000 })}
+        creditAmountMissing={creditMissing}
+        onUseSampleRevenue={() => pickAmount('revenue', { annualRevenue: 5_000_000 })}
+        pinnedRef={pinnedRef}
         saveArea={
           <SaveArea
             mode={mode}
+            requestHref={requestHref}
             destination={destination}
             canRestart={state.touched}
             onRestart={draft.restart}
-            canSave={canSave}
-            triedSave={triedSave}
+            blocker={triedSave ? saveBlocker : null}
             saving={createAssessment.isPending}
             error={createAssessment.isError ? errorMessage(createAssessment.error) : null}
             onSave={save}
@@ -446,22 +559,24 @@ function RestartButton({ onRestart }: { onRestart: () => void }) {
 
 function SaveArea({
   mode,
+  requestHref,
   destination,
   canRestart,
   onRestart,
-  canSave,
-  triedSave,
+  blocker,
   saving,
   error,
   onSave,
 }: {
   mode: WizardMode;
+  /** Ligação para o visitante pedir o diagnóstico completo por email. Null sem contacto configurado. */
+  requestHref: string | null;
   /** Onde o diagnóstico fica gravado (só para a equipa P4S). */
   destination: string;
   canRestart: boolean;
   onRestart: () => void;
-  canSave: boolean;
-  triedSave: boolean;
+  /** O que falta para gravar, depois de se ter tentado. */
+  blocker: string | null;
   saving: boolean;
   error: string | null;
   onSave: () => void;
@@ -469,9 +584,24 @@ function SaveArea({
   if (mode === 'anonymous') {
     return (
       <div className="space-y-2">
-        <Button asChild className="w-full">
+        {requestHref ? (
+          <>
+            <Button asChild className="w-full">
+              <a href={requestHref} data-testid="request-diagnosis">
+                <Mail aria-hidden /> Pedir o diagnóstico completo
+              </a>
+            </Button>
+            <p className="text-2xs text-slate-600">
+              Abre uma mensagem para a equipa Plan4Sustain, já com esta simulação. Se não abrir, escreva para{' '}
+              <span className="font-medium text-slate-900 [overflow-wrap:anywhere]">{P4S_CONTACT_EMAIL}</span>.
+            </p>
+          </>
+        ) : (
+          <p className="text-xs text-slate-700">O diagnóstico completo é feito com a equipa Plan4Sustain.</p>
+        )}
+        <Button asChild variant="outline" className="w-full">
           <Link to="/entrar?next=/">
-            <LogIn aria-hidden /> Entrar para guardar e gerar o plano
+            <LogIn aria-hidden /> Já tenho conta
           </Link>
         </Button>
         <p className="text-2xs text-slate-600">As respostas ficam neste separador até entrar.</p>
@@ -498,11 +628,11 @@ function SaveArea({
   return (
     <div className="space-y-2">
       {error && <ErrorBanner title="O diagnóstico não foi guardado." message={error} onRetry={onSave} retrying={saving} />}
-      <Button className="w-full" onClick={onSave} disabled={saving}>
+      <Button className="h-auto min-h-9 w-full whitespace-normal px-2 py-1.5" onClick={onSave} disabled={saving}>
         {saving ? 'A guardar…' : 'Guardar Diagnóstico e Gerar Plano de Ação'}
         {!saving && <ArrowRight aria-hidden />}
       </Button>
-      {triedSave && !canSave && <FieldError>Complete os dados da empresa e a faturação antes de guardar.</FieldError>}
+      {blocker && <FieldError>{blocker}</FieldError>}
       {destination && (
         <p className="text-2xs text-slate-700" data-testid="save-destination">
           {destination}
@@ -526,6 +656,7 @@ function CompanyBlock({
   showErrors,
   nifValid,
   nameValid,
+  previousDiagnosis,
 }: {
   mode: WizardMode;
   companyName: string | null;
@@ -540,6 +671,8 @@ function CompanyBlock({
   showErrors: boolean;
   nifValid: boolean;
   nameValid: boolean;
+  /** Oferta de partir das respostas do diagnóstico anterior da empresa selecionada. */
+  previousDiagnosis: ReactNode;
 }) {
   if (mode !== 'staff') {
     return (
@@ -609,10 +742,13 @@ function CompanyBlock({
             )}
           </div>
         ) : (
-          <p className="text-sm text-slate-900">
-            <span className="font-medium">{companyName}</span>{' '}
-            <span className="font-mono text-xs tabular-nums text-slate-600">NIF {companyNif}</span>
-          </p>
+          <>
+            <p className="text-sm text-slate-900">
+              <span className="font-medium">{companyName}</span>{' '}
+              <span className="font-mono text-xs tabular-nums text-slate-600">NIF {companyNif}</span>
+            </p>
+            {previousDiagnosis}
+          </>
         )}
       </CardContent>
     </Card>

@@ -125,9 +125,5 @@ export function formatCompactEUR(value: number): string {
   return formatEUR(value);
 }
 
-/** Lê um valor em euros escrito à portuguesa («1.450.000», «1450000,50»). */
-export function parseEuroInput(text: string): number {
-  const normalized = text.replace(/\s|€/g, '').replace(/\./g, '').replace(',', '.');
-  const value = Number(normalized);
-  return Number.isFinite(value) && value >= 0 ? value : 0;
-}
+/** Lê um valor em euros escrito à mão («1.450.000», «6,5M», «500 mil») ou diz porque não o percebe. */
+export { parseEuroInput, type EuroParse, type EuroParseOptions } from './euro-parse';
