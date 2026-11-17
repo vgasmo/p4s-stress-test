@@ -170,7 +170,7 @@ describe('POST /api/v1/assessments/simulate', () => {
     expect(body.commercialRisk).toEqual({ lowShare: 80, highShare: 100, low: 3_224_000, high: 4_030_000 });
     expect(body.spreadPenalty).toEqual({ lowBps: 25, highBps: 50, low: 7_500, high: 15_000 });
     expect(body.gapCount).toBe(4);
-    expect(body.sectorBlocker).toMatch(/RFQ/);
+    expect(body.sectorBlocker).toMatch(/pedidos de cotação/);
     expect(JSON.stringify(body)).not.toMatch(/weightPoints|floorPoints|estimatedCost|deadline|remediationSummary|riskScore/);
     expect(body.gaps.map((gap) => Object.keys(gap).sort())).toEqual(
       body.gaps.map(() => ['code', 'critical', 'executorType', 'label', 'phase', 'requiredByLabel', 'solutionTitle']),

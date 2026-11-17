@@ -94,7 +94,7 @@ describe('catálogo: coerência interna', () => {
   // no código público (frontend/scripts/check-bundle.mjs): se mudarem aqui, mudam lá.
   it('as frases-sentinela da verificação do bundle existem no catálogo privado', () => {
     const privatePart = JSON.stringify(CATALOG);
-    for (const sentinel of ['quatro temas EcoVadis', 'Indexação de Spread Bancário', 'fora de novos RFQ']) {
+    for (const sentinel of ['quatro temas EcoVadis', 'Indexação de Spread Bancário', 'fora de novos pedidos de cotação']) {
       expect(privatePart).toContain(sentinel);
     }
   });
@@ -195,7 +195,7 @@ describe('simulação pública: ordens de grandeza, sem pesos nem preços', () =
     const publicView = simulate(NOTHING_IN_PLACE);
     expect(publicView.gapCount).toBe(5);
     expect(publicView.criticalGapCount).toBe(3);
-    expect(publicView.sectorBlocker).toMatch(/RFQ/);
+    expect(publicView.sectorBlocker).toMatch(/pedidos de cotação/);
     expect(publicView.gaps[0]).toEqual({
       code: 'ecovadis',
       label: 'EcoVadis',

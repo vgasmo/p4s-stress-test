@@ -72,6 +72,8 @@ export type RequirementStatus = 'compliant' | 'gap' | 'not_applicable';
 export interface RequirementDefinition {
   code: RequirementCode;
   label: string;
+  /** O que é, em linguagem de fábrica, e o que conta como «já tem». */
+  summary: string;
   channel: RiskChannel;
   requiredBy: readonly RequirementSource[];
   /** Resposta do stress test que diz se a fábrica já tem isto. */
@@ -85,6 +87,8 @@ export const REQUIREMENTS: readonly RequirementDefinition[] = [
   {
     code: 'ecovadis',
     label: 'EcoVadis',
+    summary:
+      'Avaliação de sustentabilidade que os clientes pedem aos fornecedores. Conta se a empresa tem uma avaliação EcoVadis dentro da validade.',
     channel: 'commercial',
     requiredBy: ['industrial_client'],
     answerField: 'ecovadis',
@@ -93,6 +97,7 @@ export const REQUIREMENTS: readonly RequirementDefinition[] = [
   {
     code: 'carbon_scope_1_2',
     label: 'Pegada de carbono, âmbitos 1 e 2',
+    summary: 'Emissões diretas da fábrica e da energia que compra. Conta se tem o cálculo do último ano.',
     channel: 'commercial',
     requiredBy: ['industrial_client'],
     answerField: 'carbonFootprintScope12',
@@ -101,6 +106,8 @@ export const REQUIREMENTS: readonly RequirementDefinition[] = [
   {
     code: 'carbon_scope_3',
     label: 'Pegada de carbono, âmbito 3',
+    summary:
+      'Emissões da cadeia de valor: compras, transporte, uso e fim de vida do produto. Conta se já as estimou nas categorias que os clientes pedem.',
     channel: 'commercial',
     requiredBy: ['industrial_client'],
     answerField: 'carbonFootprintScope3',
@@ -109,6 +116,7 @@ export const REQUIREMENTS: readonly RequirementDefinition[] = [
   {
     code: 'banking_esg',
     label: 'Rácios ESG para a banca',
+    summary: 'Indicadores de sustentabilidade que o banco pede para renovar ou conceder crédito. Conta se já os entrega ao banco.',
     channel: 'financial',
     requiredBy: ['bank'],
     answerField: 'bankingEsgMetrics',
@@ -117,6 +125,8 @@ export const REQUIREMENTS: readonly RequirementDefinition[] = [
   {
     code: 'information_security',
     label: 'Segurança da informação (TISAX / NIS2)',
+    summary:
+      'TISAX é a avaliação de segurança da informação usada no setor automóvel. A NIS2 é a diretiva europeia de cibersegurança, que só abrange parte das empresas. Conta se tem a avaliação ou o plano de conformidade em dia.',
     channel: 'commercial',
     requiredBy: ['industrial_client', 'nis2_if_in_scope'],
     answerField: 'tisaxOrNis2',

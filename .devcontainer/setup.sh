@@ -10,7 +10,7 @@ if [ ! -f backend/.env ]; then
   ADMIN_PASSWORD="$(random 9)"
   DEMO_PASSWORD="$(random 9)"
   cat > backend/.env <<ENV
-NODE_ENV=development
+NODE_ENV=production
 PORT=${PORT:-3000}
 DATABASE_URL=${DATABASE_URL:-postgres://p4s:p4s@localhost:5432/p4s_dev}
 JWT_SECRET=$(random 48)
@@ -23,6 +23,10 @@ SEED_ADMIN_PASSWORD=${ADMIN_PASSWORD}
 SEED_ADMIN_NAME=Administrador P4S
 SEED_DEMO=true
 SEED_DEMO_PASSWORD=${DEMO_PASSWORD}
+# Contacto e condições da proposta (opcional, ver backend/.env.example)
+P4S_CONTACT_EMAIL=
+P4S_LEGAL_IDENTITY=
+P4S_PROPOSAL_TERMS=
 ENV
   cat > CONTAS-DE-TESTE.txt <<ACCOUNTS
 Contas deste ambiente de teste (geradas agora, só valem aqui)

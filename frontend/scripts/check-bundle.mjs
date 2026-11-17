@@ -12,7 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SENTINELS = ['quatro temas EcoVadis', 'Indexação de Spread Bancário', 'fora de novos RFQ'];
+const SENTINELS = ['quatro temas EcoVadis', 'Indexação de Spread Bancário', 'fora de novos pedidos de cotação'];
 
 function files(dir) {
   return readdirSync(dir).flatMap((name) => {

@@ -1,0 +1,138 @@
+# Corre em cada push e pull request: tipos, testes unitários e de integração (com PostgreSQL),
+# compilação com verificação de que o catálogo privado não vai no código público, e o
+# percurso completo no browser contra a aplicação compilada.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: p4s
+          POSTGRES_PASSWORD: p4s
+          POSTGRES_DB: p4s_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U p4s"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      # Os testes de integração só correm numa base de dados cujo nome termina em _test.
+      TEST_DATABASE_URL: postgres://p4s:p4s@localhost:5432/p4s_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - name: Dependências do backend
+        run: npm ci --no-audit --no-fund
+        working-directory: backend
+      # O frontend importa o motor de cálculo do backend: instala-se depois dele.
+      - name: Dependências do frontend
+        run: npm ci --no-audit --no-fund
+        working-directory: frontend
+      - name: Tipos do backend
+        run: npm run typecheck
+        working-directory: backend
+      - name: Testes do backend (unitários e integração)
+        run: npm test
+        working-directory: backend
+      - name: Testes unitários do frontend
+        run: npm test
+        working-directory: frontend
+      - name: Compilar o frontend (tipos, build e verificação do código público)
+        run: npm run build
+        working-directory: frontend
+      - name: Compilar o backend
+        run: npm run build
+        working-directory: backend
+
+  browser:
+    runs-on: ubuntu-latest
+    needs: testes
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: p4s
+          POSTGRES_PASSWORD: p4s
+          POSTGRES_DB: p4s_e2e
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U p4s"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgres://p4s:p4s@localhost:5432/p4s_e2e
+      STATIC_DIR: ../frontend/dist
+      SEED_ADMIN_EMAIL: admin@p4s.test
+      SEED_DEMO: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+            e2e/package-lock.json
+      - name: Segredos só para esta execução
+        run: |
+          echo "JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n')" >> "$GITHUB_ENV"
+          echo "SEED_ADMIN_PASSWORD=$(openssl rand -hex 12)" >> "$GITHUB_ENV"
+          echo "SEED_DEMO_PASSWORD=$(openssl rand -hex 12)" >> "$GITHUB_ENV"
+      - run: npm ci --no-audit --no-fund
+        working-directory: backend
+      - run: npm ci --no-audit --no-fund
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - run: npm run build
+        working-directory: backend
+      - name: Base de dados e dados de demonstração
+        run: npm run db:migrate && npm run db:seed
+        working-directory: backend
+      - name: Arrancar a aplicação
+        run: |
+          nohup npm start > ../app.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            curl -fsS http://localhost:3000/health > /dev/null && exit 0
+            sleep 1
+          done
+          cat ../app.log
+          exit 1
+        working-directory: backend
+      - name: Percurso completo no browser
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          npm test
+        working-directory: e2e
+        env:
+          E2E_BASE_URL: http://localhost:3000
+          E2E_ADMIN_EMAIL: admin@p4s.test
+          E2E_ADMIN_PASSWORD: ${{ env.SEED_ADMIN_PASSWORD }}
+          E2E_COMPANY_PASSWORD: ${{ env.SEED_DEMO_PASSWORD }}
+      - name: Registo da aplicação e capturas, se falhar
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: percurso-browser
+          path: |
+            app.log
+            e2e/capturas

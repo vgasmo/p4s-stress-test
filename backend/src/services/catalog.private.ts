@@ -82,7 +82,7 @@ export const CATALOG: Catalog = {
         estimatedCost: 4500,
         priority: { default: 'high', bySector: { automotive_molds: 'critical' } },
         phase: { default: 'phase_2_structural', bySector: { automotive_molds: 'phase_1_urgent' } },
-        // No automóvel é bloqueio de RFQ e entra na Fase 1, por isso cumpre a janela dos 60 dias.
+        // No automóvel bloqueia novos pedidos de cotação e entra na Fase 1, por isso cumpre a janela dos 60 dias.
         deadlineDays: { default: 75, bySector: { automotive_molds: 60 } },
       },
     },
@@ -92,7 +92,8 @@ export const CATALOG: Catalog = {
       sector: 'automotive_molds',
       floorPoints: 75,
       triggers: ['information_security', 'carbon_scope_1_2'],
-      reason: 'Sem TISAX/NIS2 ou sem pegada de âmbitos 1 e 2, a fábrica fica fora de novos RFQ do setor automóvel.',
+      reason:
+        'Sem avaliação de segurança da informação (TISAX) ou sem pegada de âmbitos 1 e 2, a fábrica fica fora de novos pedidos de cotação do setor automóvel.',
     },
     {
       sector: 'agro_packaging',
