@@ -9,12 +9,13 @@ import type { AssessmentDetail } from '@engine/models/api.types';
 import type { Task } from '@engine/models/domain';
 import type { UpdateTaskInput } from '@engine/models/schemas';
 import { todayInLisbon } from '@engine/utils/dates';
+import { FailedChangesNotice } from '@/components/layout/FailedChangesNotice';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState, ErrorBanner } from '@/components/ui/states';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useUpdateTask } from '@/hooks/useTasks';
+import { useTaskChanges } from '@/hooks/useTasks';
 import { errorMessage } from '@/lib/api';
 import { isStaffSession, useSession } from '@/lib/session';
 import { ExecutionKanban } from './ExecutionKanban';
@@ -27,25 +28,16 @@ interface TaskManagementBoardProps {
   tasksQuery: UseQueryResult<Task[], Error>;
 }
 
-interface FailedPatch {
-  task: Task;
-  patch: UpdateTaskInput;
-  message: string;
-}
-
 export function TaskManagementBoard({ assessment, tasksQuery }: TaskManagementBoardProps) {
   const session = useSession();
   const staff = isStaffSession(session);
-  const update = useUpdateTask(assessment.id);
+  // Alterações feitas na tabela e no kanban, e as que o servidor não gravou.
+  const changes = useTaskChanges(assessment.id);
   const [filters, setFilters] = useState<TaskFilters>(EMPTY_FILTERS);
   const [sheet, setSheet] = useState<{ open: boolean; task: Task | null }>({ open: false, task: null });
-  const [failed, setFailed] = useState<FailedPatch | null>(null);
   const today = todayInLisbon();
 
-  const patchTask = (task: Task, patch: UpdateTaskInput) => {
-    setFailed(null);
-    update.mutate({ id: task.id, patch }, { onError: (error) => setFailed({ task, patch, message: errorMessage(error) }) });
-  };
+  const patchTask = (task: Task, patch: UpdateTaskInput) => changes.change(task, patch);
   const openTask = (task: Task | null) => setSheet({ open: true, task });
 
   const allTasks = tasksQuery.data ?? [];
@@ -65,14 +57,7 @@ export function TaskManagementBoard({ assessment, tasksQuery }: TaskManagementBo
         </Button>
       </CardHeader>
       <CardContent className="space-y-3">
-        {failed && (
-          <ErrorBanner
-            title="A alteração não foi guardada e foi revertida."
-            message={failed.message}
-            onRetry={() => patchTask(failed.task, failed.patch)}
-            retrying={update.isPending}
-          />
-        )}
+        <FailedChangesNotice changes={changes} />
 
         {tasksQuery.isPending ? (
           <BoardSkeleton />
