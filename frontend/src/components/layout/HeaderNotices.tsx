@@ -30,21 +30,23 @@ export function HeaderNotices() {
   }, []);
 
   return (
-    <div ref={box} className="mx-auto max-w-[1400px] px-4 sm:px-6 [&>*]:mb-2">
-      {!online && (
-        // Uma linha só: o cabeçalho é fixo e o que crescer tapa o que está preso por baixo dele.
-        <p
-          role="status"
-          data-testid="connection-notice"
-          className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-950"
-        >
-          <WifiOff aria-hidden className="mt-px size-3.5 shrink-0 text-amber-700" />
-          <span>
-            <span className="font-medium">Sem ligação à internet.</span> As alterações não ficam guardadas até a ligação voltar.
-          </span>
-        </p>
-      )}
-      <div id={SLOT_ID} className="space-y-2 empty:hidden" />
+    <div ref={box} className="mx-auto max-w-[1400px] px-4 sm:px-6">
+      {/* A zona existe sempre, vazia: é assim que o leitor de ecrã anuncia o aviso quando aparece. */}
+      <div role="status">
+        {!online && (
+          // Uma linha só: o cabeçalho é fixo e o que crescer tapa o que está preso por baixo dele.
+          <p
+            data-testid="connection-notice"
+            className="mb-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-950"
+          >
+            <WifiOff aria-hidden className="mt-px size-3.5 shrink-0 text-amber-700" />
+            <span>
+              <span className="font-medium">Sem ligação à internet.</span> As alterações não ficam guardadas até a ligação voltar.
+            </span>
+          </p>
+        )}
+      </div>
+      <div id={SLOT_ID} className="space-y-2 pb-2 empty:hidden" />
     </div>
   );
 }
