@@ -100,6 +100,16 @@ describe('o que não percebe é recusado, nunca adivinhado', () => {
     expect(refusal('1.450.00.0')).toBe('separators');
   });
 
+  it('um número com milhares não começa por zero', () => {
+    expect(refusal('0.500')).toBe('separators');
+    expect(refusal('0.5')).toBe('separators');
+    expect(refusal('0.5M')).toBe('separators');
+    expect(refusal('012.345')).toBe('separators');
+    expect(refusal('0 500')).toBe('separators');
+    expect(value('0,5M')).toBe(500_000);
+    expect(value('0500')).toBe(500);
+  });
+
   it('vírgulas à inglesa também não', () => {
     expect(refusal('1,450,000')).toBe('separators');
     expect(refusal('6,500 €')).toBe('separators');

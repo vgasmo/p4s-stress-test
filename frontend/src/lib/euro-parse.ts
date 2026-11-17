@@ -55,10 +55,13 @@ const TAILS = new Map<string, number>(
   ),
 );
 
-/** Algarismos seguidos, ou grupos de três separados por ponto ou por espaço, e vírgula decimal. */
-const NUMBER = /^(\d+|\d{1,3}(?:\.\d{3})+|\d{1,3}(?: \d{3})+)(?:,(\d*))?$/;
+/**
+ * Algarismos seguidos, ou grupos de três separados por ponto ou por espaço, e vírgula decimal.
+ * Um número com milhares não começa por zero: «0.500» é um decimal à inglesa, não quinhentos.
+ */
+const NUMBER = /^(\d+|[1-9]\d{0,2}(?:\.\d{3})+|[1-9]\d{0,2}(?: \d{3})+)(?:,(\d*))?$/;
 /** Número com o último grupo de milhares ainda por acabar de escrever. */
-const GROUP_IN_PROGRESS = /^\d{1,3}(?:(?:\.\d{3})*\.\d{0,2}|(?: \d{3})* \d{1,2})$/;
+const GROUP_IN_PROGRESS = /^[1-9]\d{0,2}(?:(?:\.\d{3})*\.\d{0,2}|(?: \d{3})* \d{1,2})$/;
 
 const MESSAGES: Record<Exclude<EuroParseFailure, 'too_large'>, string> = {
   unrecognized: 'Não é um valor em euros. Pode escrever 6.500.000, 6,5M ou 500 mil.',

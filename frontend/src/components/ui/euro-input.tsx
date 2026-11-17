@@ -51,7 +51,7 @@ export function EuroInput({
   // O valor mudou sem ser por este campo (botão rápido, recomeçar, outra empresa): o texto que
   // estava escrito já não corresponde a nada.
   const [seenValue, setSeenValue] = useState(value);
-  if (seenValue !== value) {
+  if (!Object.is(seenValue, value)) {
     setSeenValue(value);
     if (editing && editing.committed !== value) setEditing(null);
   }
