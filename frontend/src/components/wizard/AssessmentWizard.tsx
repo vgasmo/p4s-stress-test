@@ -1,4 +1,4 @@
-import { ArrowRight, Building2, ClipboardList, LogIn, RotateCcw } from 'lucide-react';
+import { ArrowRight, Building2, ClipboardList, LogIn, Mail, RotateCcw } from 'lucide-react';
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { SECTOR_PROFILES } from '@engine/models/domain';
@@ -16,10 +16,12 @@ import { Switch } from '@/components/ui/switch';
 import { useCompanies, useMe } from '@/hooks/useAuth';
 import { useCatalog, useCreateAssessment, usePublicSimulation, useStressTestPreview } from '@/hooks/useAssessment';
 import { errorMessage, type CreateAssessmentPayload } from '@/lib/api';
+import { P4S_CONTACT_EMAIL, diagnosisRequestMailto } from '@/lib/contact';
 import {
   SECTOR_PROFILE_LABELS,
   formatCompactEUR,
   formatEUR,
+  formatEuroRange,
   formatNumberPt,
   formatWeight,
 } from '@/lib/formatters';
@@ -218,6 +220,24 @@ export function AssessmentWizard() {
     setPicks((current) => ({ ...current, [field]: current[field] + 1 }));
   };
   const resetAmountFields = () => setPicks((current) => ({ revenue: current.revenue + 1, credit: current.credit + 1 }));
+
+  // Visitante sem conta: o passo seguinte é pedir o diagnóstico completo à equipa, por email,
+  // já com o que simulou. Só existe se quem publicou tiver indicado o endereço de contacto.
+  const simulatedRisk = publicSimulation.isPlaceholderData ? null : publicSimulation.data?.commercialRisk;
+  const requestHref =
+    mode === 'anonymous' && P4S_CONTACT_EMAIL
+      ? diagnosisRequestMailto(
+          P4S_CONTACT_EMAIL,
+          state.annualRevenue > 0
+            ? {
+                sector: SECTOR_PROFILE_LABELS[state.sectorProfile],
+                annualRevenue: formatEUR(state.annualRevenue),
+                topClientsShare: `${state.topClientsShare}%`,
+                atRisk: simulatedRisk ? formatEuroRange(simulatedRisk.low, simulatedRisk.high) : null,
+              }
+            : undefined,
+        )
+      : null;
 
   const dealbreaker = catalog.data?.dealbreakers.find((rule) => rule.sector === state.sectorProfile);
   const spreadBps = catalog.data?.spreadPenaltyBps;
@@ -473,6 +493,7 @@ export function AssessmentWizard() {
         saveArea={
           <SaveArea
             mode={mode}
+            requestHref={requestHref}
             destination={destination}
             canRestart={state.touched}
             onRestart={draft.restart}
@@ -537,6 +558,7 @@ function RestartButton({ onRestart }: { onRestart: () => void }) {
 
 function SaveArea({
   mode,
+  requestHref,
   destination,
   canRestart,
   onRestart,
@@ -546,6 +568,8 @@ function SaveArea({
   onSave,
 }: {
   mode: WizardMode;
+  /** Ligação para o visitante pedir o diagnóstico completo por email. Null sem contacto configurado. */
+  requestHref: string | null;
   /** Onde o diagnóstico fica gravado (só para a equipa P4S). */
   destination: string;
   canRestart: boolean;
@@ -559,9 +583,24 @@ function SaveArea({
   if (mode === 'anonymous') {
     return (
       <div className="space-y-2">
-        <Button asChild className="w-full">
+        {requestHref ? (
+          <>
+            <Button asChild className="w-full">
+              <a href={requestHref} data-testid="request-diagnosis">
+                <Mail aria-hidden /> Pedir o diagnóstico completo
+              </a>
+            </Button>
+            <p className="text-2xs text-slate-600">
+              Abre uma mensagem para a equipa Plan4Sustain, já com esta simulação. Se não abrir, escreva para{' '}
+              <span className="font-medium text-slate-900 [overflow-wrap:anywhere]">{P4S_CONTACT_EMAIL}</span>.
+            </p>
+          </>
+        ) : (
+          <p className="text-xs text-slate-700">O diagnóstico completo é feito com a equipa Plan4Sustain.</p>
+        )}
+        <Button asChild variant="outline" className="w-full">
           <Link to="/entrar?next=/">
-            <LogIn aria-hidden /> Entrar para guardar e gerar o plano
+            <LogIn aria-hidden /> Já tenho conta
           </Link>
         </Button>
         <p className="text-2xs text-slate-600">As respostas ficam neste separador até entrar.</p>

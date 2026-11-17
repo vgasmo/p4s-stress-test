@@ -433,8 +433,7 @@ function publicPreview(source: Extract<PreviewSource, { kind: 'public' }>, credi
         )}
 
         <p className="border-t border-slate-200 px-4 py-2 text-xs text-slate-600">
-          Ordem de grandeza. O valor estimado, o plano e o preço fechado ficam no diagnóstico completo, com a equipa
-          Plan4Sustain.
+          Ordem de grandeza. O valor estimado, o plano e o preço fechado ficam no diagnóstico completo.
         </p>
       </div>
     ),
