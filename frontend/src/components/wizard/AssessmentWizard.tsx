@@ -27,6 +27,8 @@ import { isStaffSession, useSession } from '@/lib/session';
 import { cn } from '@/lib/utils';
 import type { PlanNavigationState } from '@/pages/ActionPlanPage';
 import { LiveImpactPreview } from './LiveImpactPreview';
+import { PreviousDiagnosisOffer } from './PreviousDiagnosisOffer';
+import { applyPreviousAnswers, type PreviousAnswers } from './previous-answers';
 import { RadioTiles } from './RadioTiles';
 import { useAppHeaderHeight, useElementHeight } from './useElementHeight';
 import {
@@ -87,6 +89,8 @@ function useWizardDraft(ctx: DraftContext | undefined) {
     revision,
     /** Alteração feita pelo utilizador. */
     update: (patch: Partial<WizardState>) => setState((current) => ({ ...current, ...patch, touched: true })),
+    /** Respostas de um diagnóstico anterior, pedidas pelo consultor. */
+    applyAnswers: (answers: PreviousAnswers) => setState((current) => applyPreviousAnswers(current, answers)),
     /** Liga ou desliga o registo de uma empresa nova: em ambos os casos começa com o formulário limpo. */
     setNewCompany: (on: boolean) => ctx && replace(on ? newCompanyDraft(ctx) : freshDraft(ctx)),
     restart: () => ctx && replace(state.newCompany ? newCompanyDraft(ctx) : freshDraft(ctx)),
@@ -213,6 +217,7 @@ export function AssessmentWizard() {
     update(patch);
     setPicks((current) => ({ ...current, [field]: current[field] + 1 }));
   };
+  const resetAmountFields = () => setPicks((current) => ({ revenue: current.revenue + 1, credit: current.credit + 1 }));
 
   const dealbreaker = catalog.data?.dealbreakers.find((rule) => rule.sector === state.sectorProfile);
   const spreadBps = catalog.data?.spreadPenaltyBps;
@@ -244,6 +249,24 @@ export function AssessmentWizard() {
           showErrors={triedSave}
           nifValid={nifValid}
           nameValid={nameValid}
+          previousDiagnosis={
+            staff && company && !quickCreate ? (
+              <PreviousDiagnosisOffer
+                // Outra empresa, ou «Recomeçar», volta à oferta.
+                key={`${company.id}-${draft.revision}`}
+                record={company}
+                current={state}
+                onApply={(answers) => {
+                  draft.applyAnswers(answers);
+                  resetAmountFields();
+                }}
+                onUseRecord={(record) => {
+                  update(record);
+                  resetAmountFields();
+                }}
+              />
+            ) : null
+          }
         />
         {staff && draft.setAside && (
           <SetAsideNotice
@@ -593,6 +616,7 @@ function CompanyBlock({
   showErrors,
   nifValid,
   nameValid,
+  previousDiagnosis,
 }: {
   mode: WizardMode;
   companyName: string | null;
@@ -607,6 +631,8 @@ function CompanyBlock({
   showErrors: boolean;
   nifValid: boolean;
   nameValid: boolean;
+  /** Oferta de partir das respostas do diagnóstico anterior da empresa selecionada. */
+  previousDiagnosis: ReactNode;
 }) {
   if (mode !== 'staff') {
     return (
@@ -676,10 +702,13 @@ function CompanyBlock({
             )}
           </div>
         ) : (
-          <p className="text-sm text-slate-900">
-            <span className="font-medium">{companyName}</span>{' '}
-            <span className="font-mono text-xs tabular-nums text-slate-600">NIF {companyNif}</span>
-          </p>
+          <>
+            <p className="text-sm text-slate-900">
+              <span className="font-medium">{companyName}</span>{' '}
+              <span className="font-mono text-xs tabular-nums text-slate-600">NIF {companyNif}</span>
+            </p>
+            {previousDiagnosis}
+          </>
         )}
       </CardContent>
     </Card>
