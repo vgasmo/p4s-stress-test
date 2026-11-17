@@ -8,6 +8,7 @@ import { ROLE_LABELS } from '@/lib/formatters';
 import { isStaffSession, useSession } from '@/lib/session';
 import { cn } from '@/lib/utils';
 import { CompanySwitcher } from './CompanySwitcher';
+import { HeaderNotices } from './HeaderNotices';
 
 export const FOOTER_SIGNATURE =
   'Conformidade documental para a cadeia de fornecimento: Pegada de Carbono, EcoVadis, Relatórios para a Banca e Segurança da Informação. Um só interlocutor, zero dispersão.';
@@ -96,6 +97,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
           </div>
         </div>
+        <HeaderNotices />
       </header>
 
       <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-6 sm:px-6">{children}</main>

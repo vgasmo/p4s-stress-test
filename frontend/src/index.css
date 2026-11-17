@@ -5,6 +5,9 @@
 @layer base {
   html {
     font-feature-settings: 'cv11', 'ss01';
+    /* O cabeçalho é fixo: ao andar com o Tab, o elemento que recebe o foco fica abaixo dele, com
+       folga. A altura vem de HeaderNotices, porque o cabeçalho cresce em ecrãs estreitos e com avisos. */
+    scroll-padding-top: calc(var(--app-header-height, 3.5rem) + 0.75rem);
   }
   body {
     @apply bg-slate-50 text-sm text-slate-900;

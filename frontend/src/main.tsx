@@ -12,6 +12,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { ErrorBoundary } from '@/components/layout/ErrorBoundary';
+import { RouteTitle } from '@/components/layout/RouteTitle';
 import { ApiError } from '@/lib/api';
 import { App } from './App';
 
@@ -21,6 +22,11 @@ const queryClient = new QueryClient({
       // Erros 4xx não melhoram com nova tentativa; falhas de rede sim (uma vez).
       retry: (failureCount, error) => !(error instanceof ApiError && error.status >= 400 && error.status < 500) && failureCount < 1,
       refetchOnWindowFocus: false,
+    },
+    mutations: {
+      // Sem rede, uma alteração é enviada na mesma e falha logo com «Sem ligação»: o ecrã desfaz-a
+      // e avisa. Por omissão ficava em espera, sem aviso, até a rede voltar.
+      networkMode: 'always',
     },
   },
 });
@@ -32,6 +38,7 @@ createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
+        <RouteTitle />
         <ErrorBoundary>
           <App />
         </ErrorBoundary>
