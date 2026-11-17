@@ -12,6 +12,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { ErrorBoundary } from '@/components/layout/ErrorBoundary';
+import { RouteTitle } from '@/components/layout/RouteTitle';
 import { ApiError } from '@/lib/api';
 import { App } from './App';
 
@@ -37,6 +38,7 @@ createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
+        <RouteTitle />
         <ErrorBoundary>
           <App />
         </ErrorBoundary>
