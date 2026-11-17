@@ -52,3 +52,6 @@ echo "A instalar dependências e a compilar (alguns minutos na primeira vez)…"
 
 echo
 cat CONTAS-DE-TESTE.txt
+
+# Arranca já a aplicação: o arranque automático do ambiente pode correr antes de a preparação acabar.
+bash .devcontainer/start.sh || echo "A aplicação não arrancou. Ver /tmp/p4s-stress-test.log e correr: bash .devcontainer/start.sh" >&2
