@@ -44,15 +44,10 @@ echo "A instalar dependências e a compilar (alguns minutos na primeira vez)…"
 (cd frontend && npm ci --no-audit --no-fund && npm run build)
 (cd backend && npm run build)
 
-# A base de dados pode demorar uns segundos a aceitar ligações.
-for attempt in $(seq 1 30); do
-  if (cd backend && npm run --silent db:migrate); then break; fi
-  if [ "$attempt" = 30 ]; then
-    echo "A base de dados não respondeu. Corra de novo: bash .devcontainer/setup.sh" >&2
-    exit 1
-  fi
-  sleep 2
-done
+# A base de dados pode demorar uns segundos a aceitar ligações. Espera-se por ela à parte, para
+# um erro numa migração aparecer como o que é, e não como «a base de dados não respondeu».
+(cd backend && node ../.devcontainer/wait-for-db.cjs)
+(cd backend && npm run --silent db:migrate)
 (cd backend && npm run --silent db:seed)
 
 echo

@@ -2,12 +2,24 @@
 // Cada migração corre numa transação própria e fica registada em schema_migrations.
 // Uso: npm run db:migrate
 
+import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import type pg from 'pg';
 
-export const MIGRATIONS_DIR = path.resolve(process.env.MIGRATIONS_DIR ?? path.join(process.cwd(), 'db', 'migrations'));
+/**
+ * A pasta db/migrations procura-se a partir deste ficheiro (em desenvolvimento está um nível
+ * acima; depois de compilado, dois), para não depender da pasta de onde a API é arrancada.
+ */
+function findMigrationsDir(): string {
+  if (process.env.MIGRATIONS_DIR) return path.resolve(process.env.MIGRATIONS_DIR);
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [path.join(here, '..', 'db', 'migrations'), path.join(here, '..', '..', 'db', 'migrations')];
+  return path.resolve(candidates.find((candidate) => existsSync(candidate)) ?? path.join(process.cwd(), 'db', 'migrations'));
+}
+
+export const MIGRATIONS_DIR = findMigrationsDir();
 
 /** Migrações que existem em disco e ainda não foram aplicadas a esta base de dados. */
 export async function pendingMigrations(pool: pg.Pool, dir: string = MIGRATIONS_DIR): Promise<string[]> {

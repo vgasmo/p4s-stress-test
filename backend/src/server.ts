@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { pendingMigrations } from '../scripts/migrate.js';
 import { createApp } from './app.js';
 import { pool } from './config/database.js';
@@ -25,7 +27,20 @@ async function assertDatabaseIsReady(): Promise<void> {
   }
 }
 
+/** Com STATIC_DIR definido, a interface compilada tem de lá estar. */
+function assertInterfaceIsBuilt(): void {
+  if (!env.STATIC_DIR) return;
+  const index = path.join(path.resolve(env.STATIC_DIR), 'index.html');
+  if (existsSync(index)) return;
+  console.error(
+    `[api] STATIC_DIR aponta para ${path.resolve(env.STATIC_DIR)}, mas não há lá index.html. ` +
+      'Compile a interface (cd frontend && npm run build) ou corrija o caminho.',
+  );
+  process.exit(1);
+}
+
 await assertDatabaseIsReady();
+assertInterfaceIsBuilt();
 
 // O Express chama esta função também quando não consegue abrir o porto. Sem tratar o erro, a
 // API dizia que tinha arrancado e terminava sozinha pouco depois, com quem estava a testar a

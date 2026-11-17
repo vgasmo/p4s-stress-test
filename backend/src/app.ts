@@ -86,7 +86,12 @@ export function createApp(options: AppOptions = {}): Express {
       // Um ficheiro que não existe (/assets/x.js) é um 404, não a página da aplicação. Os outros
       // caminhos são ecrãs, mesmo com pontos pelo meio: é a aplicação que decide o que mostrar.
       if (!pageRequest || req.path.startsWith('/api/') || STATIC_FILE.test(req.path)) return next();
-      res.set('Cache-Control', 'no-cache').sendFile(path.join(staticDir, 'index.html'));
+      res.set('Cache-Control', 'no-cache').sendFile(path.join(staticDir, 'index.html'), (error) => {
+        if (!error || res.headersSent) return;
+        // A interface compilada desapareceu: é um problema da instalação, não de quem pede.
+        console.error(`[api] Não foi possível servir ${path.join(staticDir, 'index.html')}: ${error.message}`);
+        res.status(503).json({ error: { code: 'UNAVAILABLE', message: 'A interface não está disponível neste servidor.' } });
+      });
     });
   }
 

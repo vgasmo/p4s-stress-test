@@ -678,6 +678,15 @@ describe('aplicação servida no mesmo processo', () => {
     await request(served).get('/favicon.ico').expect(404);
   });
 
+  it('sem a interface compilada responde 503 e não culpa quem pede', async () => {
+    const missing = createApp({ staticDir: path.join(staticDir, 'nao-existe') });
+    const response = await request(missing).get('/plano');
+    expect(response.status).toBe(503);
+    expect(response.body.error).toEqual({ code: 'UNAVAILABLE', message: 'A interface não está disponível neste servidor.' });
+    // A API continua a responder.
+    await request(missing).get('/api/v1/public-info').expect(200);
+  });
+
   it('a API e os outros métodos não recebem a página da aplicação', async () => {
     const api = await request(served).get('/api/v1/nada').expect(404);
     expect(api.body.error.code).toBe('NOT_FOUND');

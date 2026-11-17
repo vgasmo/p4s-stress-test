@@ -24,6 +24,8 @@ if running; then
 fi
 
 [ -f dist/src/server.js ] || npm run build
+# Ao reabrir o ambiente, a base de dados pode ainda estar a arrancar.
+node ../.devcontainer/wait-for-db.cjs
 # A API não arranca com migrações por aplicar: aplica as que faltarem (não faz nada se não houver).
 npm run --silent db:migrate
 nohup npm start > /tmp/p4s-stress-test.log 2>&1 &
