@@ -199,7 +199,7 @@ export function AssessmentWizard() {
   const destination = quickCreate
     ? existingByNif
       ? `Fica gravado em ${existingByNif.name} · NIF ${existingByNif.nif}, que já está registada.`
-      : `Fica gravado numa empresa nova: ${typedName || 'nome por indicar'} · NIF ${nifValid ? typedNif : 'por indicar'}.`
+      : `Fica gravado numa empresa nova: ${typedName || 'nome por indicar'} · NIF ${nifValid ? typedNif : typedNif ? 'por corrigir' : 'por indicar'}.`
     : company
       ? `Fica gravado em ${company.name} · NIF ${company.nif}.`
       : '';
