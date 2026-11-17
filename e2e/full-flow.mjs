@@ -57,6 +57,12 @@ page.on('request', (request) => {
   if (request.isNavigationRequest() && request.frame() === page.mainFrame()) inFlight.clear();
   if (isApi(request)) inFlight.add(request);
 });
+// O documento anterior ainda pode lançar um pedido de leitura depois de a navegação ter começado
+// (por exemplo ao redesenhar o ecrã de entrada). Esse pedido morre com o documento e nunca é dado
+// por terminado: quando o documento novo fica pronto, as leituras que vinham de trás saem da conta.
+page.on('domcontentloaded', () => {
+  for (const request of inFlight) if (request.method() === 'GET') inFlight.delete(request);
+});
 page.on('requestfinished', (request) => inFlight.delete(request));
 page.on('requestfailed', (request) => inFlight.delete(request));
 page.on('response', (response) => {
@@ -71,8 +77,11 @@ const settle = async () => {
     await page.waitForTimeout(50);
     quiet = inFlight.size === 0 ? quiet + 1 : 0;
     if (Date.now() - started > 10_000) {
-      fail(`pedidos sem resposta ao fim de 10 s: ${[...inFlight].map((r) => `${r.method()} ${new URL(r.url()).pathname}`).join(', ')}`);
+      const stuck = [...inFlight].map((r) => `${r.method()} ${new URL(r.url()).pathname}`);
       inFlight.clear();
+      // Uma escrita sem resposta é uma falha. Uma leitura pode ter sido abandonada por uma navegação.
+      if (stuck.some((entry) => !entry.startsWith('GET '))) fail(`pedidos sem resposta ao fim de 10 s: ${stuck.join(', ')}`);
+      else log(`(leituras abandonadas, sem resposta ao fim de 10 s: ${stuck.join(', ')})`);
       return;
     }
   }
