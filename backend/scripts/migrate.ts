@@ -42,7 +42,9 @@ export async function runMigrations(pool: pg.Pool, dir: string = MIGRATIONS_DIR)
       newlyApplied.push(file);
     } catch (error) {
       await client.query('ROLLBACK').catch(() => undefined);
-      throw new Error(`Falhou a migração ${file}: ${(error as Error).message}`);
+      // O PostgreSQL diz no detalhe que linhas causaram o erro: sem isso não se sabe o que corrigir.
+      const { message, detail } = error as Error & { detail?: string };
+      throw new Error(`Falhou a migração ${file}: ${message}${detail ? ` (${detail})` : ''}`);
     } finally {
       client.release();
     }
