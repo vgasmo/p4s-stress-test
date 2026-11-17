@@ -73,6 +73,25 @@ export const ROLE_LABELS: Record<UserRole, string> = {
 
 export const sectorLabel = (sector: SectorProfile) => SECTOR_PROFILE_LABELS[sector];
 
+const DATE_TIME_PT = new Intl.DateTimeFormat('pt-PT', {
+  timeZone: 'Europe/Lisbon',
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
+/** Instante (ISO) em hora de Lisboa: «24/11/2026, 17:55». */
+export function formatDateTimePt(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? '—' : DATE_TIME_PT.format(date);
+}
+
+/** Endereço que o utilizador abre para definir a palavra-passe. O token vai no fragmento, que não chega a servidores nem a registos de acesso. */
+export const passwordLinkUrl = (token: string) => `${window.location.origin}/definir-palavra-passe#token=${token}`;
+
 /** Sobrecusto anual estimado, como ordem de grandeza: «≈ +10 mil €/ano». */
 export const formatApproxPerYear = (value: number) =>
   value > 0 ? `≈\u00A0+${formatMagnitudeEUR(value)}/ano` : `${formatEUR(0)}/ano`;

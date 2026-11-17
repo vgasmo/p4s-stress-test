@@ -58,6 +58,10 @@ export function isPricedExecutor(executor: TaskExecutor): boolean {
   return (PRICED_EXECUTORS as readonly TaskExecutor[]).includes(executor);
 }
 
+/** Regras da palavra-passe. O bcrypt só usa os primeiros 72 bytes: mais do que isso seria cortado em silêncio. */
+export const PASSWORD_MIN_LENGTH = 10;
+export const PASSWORD_MAX_BYTES = 72;
+
 /** Conteúdo validado do JWT de acesso. */
 export interface AuthUser {
   userId: string;

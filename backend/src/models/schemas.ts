@@ -5,6 +5,8 @@ import { MAX_MONEY_AMOUNT } from '../services/stress-test-calculator.service.js'
 import { isValidIsoDate } from '../utils/dates.js';
 import { isValidCae, isValidNif } from '../utils/validation.js';
 import {
+  PASSWORD_MAX_BYTES,
+  PASSWORD_MIN_LENGTH,
   SECTOR_PROFILES,
   STAFF_ROLES,
   TASK_DOMAINS,
@@ -43,12 +45,13 @@ export const refreshSchema = z.strictObject({
 });
 export type RefreshInput = z.infer<typeof refreshSchema>;
 
-/** bcrypt só usa os primeiros 72 bytes: palavras-passe mais compridas seriam cortadas em silêncio. */
-export const PASSWORD_MIN_LENGTH = 10;
 const password = z
   .string()
   .min(PASSWORD_MIN_LENGTH, `A palavra-passe tem de ter pelo menos ${PASSWORD_MIN_LENGTH} caracteres.`)
-  .refine((value) => new TextEncoder().encode(value).length <= 72, 'A palavra-passe é demasiado comprida (máximo 72 bytes).');
+  .refine(
+    (value) => new TextEncoder().encode(value).length <= PASSWORD_MAX_BYTES,
+    `A palavra-passe é demasiado comprida (máximo ${PASSWORD_MAX_BYTES} bytes).`,
+  );
 const passwordToken = z.string().min(20, 'Link inválido.').max(200, 'Link inválido.');
 
 export const inspectPasswordLinkSchema = z.strictObject({ token: passwordToken });

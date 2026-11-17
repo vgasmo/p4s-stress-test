@@ -4,7 +4,9 @@ import { AppShell } from '@/components/layout/AppShell';
 import { useSession } from '@/lib/session';
 import { ActionPlanPage } from '@/pages/ActionPlanPage';
 import { LoginPage } from '@/pages/LoginPage';
+import { SetPasswordPage } from '@/pages/SetPasswordPage';
 import { StressTestPage } from '@/pages/StressTestPage';
+import { UsersPage } from '@/pages/UsersPage';
 
 function RequireSession({ children }: { children: ReactNode }) {
   const session = useSession();
@@ -25,6 +27,15 @@ export function App() {
       >
         <Route path="/" element={<StressTestPage />} />
         <Route path="/entrar" element={<LoginPage />} />
+        <Route path="/definir-palavra-passe" element={<SetPasswordPage />} />
+        <Route
+          path="/utilizadores"
+          element={
+            <RequireSession>
+              <UsersPage />
+            </RequireSession>
+          }
+        />
         <Route
           path="/plano/:assessmentId?"
           element={

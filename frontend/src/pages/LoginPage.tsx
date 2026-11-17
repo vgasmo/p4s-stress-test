@@ -77,6 +77,9 @@ export function LoginPage() {
               <LogIn aria-hidden />
               {pending ? 'A entrar…' : 'Entrar'}
             </Button>
+            <p className="text-xs text-slate-600">
+              Esqueceu-se da palavra-passe ou ainda não tem conta? Peça um link de acesso ao seu consultor Plan4Sustain.
+            </p>
           </form>
         </CardContent>
       </Card>

@@ -1,7 +1,8 @@
-import { LogOut } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { KeyRound, LogOut } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { ChangePasswordSheet } from '@/components/users/ChangePasswordSheet';
 import { useAuthActions } from '@/hooks/useAuth';
 import { ROLE_LABELS } from '@/lib/formatters';
 import { isStaffSession, useSession } from '@/lib/session';
@@ -38,6 +39,7 @@ const navClass = ({ isActive }: { isActive: boolean }) =>
 export function AppShell({ children }: { children: ReactNode }) {
   const session = useSession();
   const { logout } = useAuthActions();
+  const [changingPassword, setChangingPassword] = useState(false);
 
   return (
     <div data-app-shell className="flex min-h-screen flex-col">
@@ -59,6 +61,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                 Plano de ação
               </NavLink>
             )}
+            {isStaffSession(session) && (
+              <NavLink to="/utilizadores" className={navClass}>
+                Utilizadores
+              </NavLink>
+            )}
           </nav>
           <div className="ml-auto flex items-center gap-3">
             {isStaffSession(session) && <CompanySwitcher />}
@@ -68,6 +75,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <p className="text-xs font-medium text-slate-900">{session.user.fullName}</p>
                   <p className="text-2xs text-slate-600">{ROLE_LABELS[session.user.role]}</p>
                 </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setChangingPassword(true)}
+                  aria-label="Alterar palavra-passe"
+                  title="Alterar palavra-passe"
+                >
+                  <KeyRound aria-hidden />
+                </Button>
                 <Button variant="ghost" size="sm" onClick={logout} aria-label="Terminar sessão">
                   <LogOut aria-hidden />
                   <span className="hidden sm:inline">Sair</span>
@@ -83,6 +99,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </header>
 
       <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-6 sm:px-6">{children}</main>
+      {session && <ChangePasswordSheet open={changingPassword} onOpenChange={setChangingPassword} />}
 
       <footer className="border-t border-slate-200 bg-white">
         <div className="mx-auto flex max-w-[1400px] flex-col gap-1 px-4 py-4 text-xs text-slate-600 sm:flex-row sm:items-center sm:justify-between sm:px-6">
